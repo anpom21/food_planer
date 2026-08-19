@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>PROTOTYPE — Dish Library screen</title>
+<!--
+  THROWAWAY PROTOTYPE — answers wayfinder ticket "Dish Library screen behavior"
+  (https://github.com/anpom21/food_planer/issues/5, child of map issue #1).
+
+  Plan: three structurally different variants of the Dish Library screen —
+  progressive disclosure of optional Dish fields, Favourite/Stable tagging,
+  edit/delete — switchable via ?variant=A|B|C. No existing frontend/route
+  exists yet in this repo, so this is a standalone file: double-click to
+  open in a browser, no build step, no server.
+
+  State is in-memory only. Nothing here is production code — no tests, no
+  real persistence, minimal error handling. Once a variant wins, fold the
+  decision into the real spec/build and leave this file on the throwaway
+  branch, not main.
+-->
+<style>
+  :root {
+    --bg: #faf6f0;
+    --panel: #ffffff;
+    --ink: #2c2622;
+    --ink-soft: #6b625a;
+    --line: #e7dfd3;
+    --accent: #c1592b;
+    --accent-soft: #f3ddd0;
+    --favourite: #d98c1f;
+    --stable: #2f7a63;
+    --radius: 10px;
+    --shadow: 0 1px 2px rgba(44,38,34,0.06), 0 4px 14px rgba(44,38,34,0.06);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+  }
+  header.page {
+    padding: 28px 32px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  header.page h1 { margin: 0 0 4px; font-size: 22px; }
+  header.page p { margin: 0; color: var(--ink-soft); font-size: 13.5px; }
+  header.page .variant-tag {
+    display: inline-block;
+    margin-top: 10px;
+    font-size: 11.5px;
+    letter-spacing: .02em;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  main { max-width: 960px; margin: 0 auto; padding: 28px 32px 120px; }
+  button { font: inherit; cursor: pointer; }
+  input, textarea { font: inherit; }
+  .btn {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13.5px;
+    color: var(--ink);
+  }
+  .btn:hover { border-color: #d8cabb; background: #fbf8f3; }
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+  .btn.primary:hover { background: #a94a22; }
+  .btn.primary:disabled { background: #d7b6a4; border-color: #d7b6a4; cursor: not-allowed; }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--ink-soft); }
+  .btn.ghost:hover { background: #f1ebe1; color: var(--ink); }
+  .btn.danger { color: #a83232; }
+  .btn.danger:hover { background: #fbeaea; border-color: #f0caca; }
+  .tag-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 12px; padding: 3px 8px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink-soft);
+  }
+  .tag-chip.on.fav { background: #fdf1de; border-color: #f0d29a; color: var(--favourite); font-weight: 600; }
+  .tag-chip.on.stable { background: #e6f2ee; border-color: #b7dccf; color: var(--stable); font-weight: 600; }
+  .tag-chip:hover { filter: brightness(0.97); }
+  textarea {
+    width: 100%; border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; resize: vertical; min-height: 64px; color: var(--ink);
+    background: var(--panel);
+  }
+  input[type=text] {
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: var(--ink);
+    background: var(--panel);
+  }
+  input[type=text]:focus, textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+  .empty-state {
+    text-align: center; padding: 60px 20px; color: var(--ink-soft);
+    border: 1px dashed var(--line); border-radius: var(--radius); background: #fffdfa;
+  }
+  .empty-state p { margin: 0 0 14px; }
+
+  /* ---------- switcher bar ---------- */
+  #proto-switcher {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 2px;
+    background: #1f1a16; color: #fff; border-radius: 999px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.28);
+    padding: 6px; z-index: 999; font-size: 13px;
+  }
+  #proto-switcher button {
+    background: transparent; border: none; color: #fff; width: 32px; height: 32px;
+    border-radius: 999px; font-size: 15px; display: flex; align-items: center; justify-content: center;
+  }
+  #proto-switcher button:hover { background: rgba(255,255,255,0.14); }
+  #proto-switcher .label { padding: 0 12px; white-space: nowrap; font-weight: 500; }
+  #proto-switcher .label b { color: #ffd7ba; }
+  #proto-switcher .sep { width: 1px; align-self: stretch; background: rgba(255,255,255,0.18); margin: 4px 2px; }
+  #proto-switcher .empty-toggle { font-size: 11.5px; padding: 0 10px; opacity: .85; }
+  #proto-switcher .empty-toggle:hover { opacity: 1; }
+
+  /* ================= Variant A: accordion list ================= */
+  .a-list { display: flex; flex-direction: column; gap: 8px; }
+  .a-add-row {
+    display: flex; gap: 8px; padding: 10px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 4px;
+  }
+  .a-add-row input[type=text] { flex: 1; }
+  .a-row {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .a-row-head {
+    display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer;
+  }
+  .a-row-head:hover { background: #fbf8f3; }
+  .a-row-head .title { font-weight: 600; flex: 1; }
+  .a-row-head .meta { font-size: 12px; color: var(--ink-soft); }
+  .a-chevron { color: var(--ink-soft); font-size: 12px; width: 14px; text-align: center; }
+  .a-row-actions { display: flex; align-items: center; gap: 4px; }
+  .a-row-body { padding: 4px 14px 14px 38px; border-top: 1px solid var(--line); }
+  .a-section { border-top: 1px dashed var(--line); padding: 10px 0; }
+  .a-section:first-child { border-top: none; }
+  .a-section-head {
+    display: flex; align-items: center; justify-content: space-between; cursor: pointer;
+    font-size: 13px; color: var(--ink-soft); font-weight: 600;
+  }
+  .a-section-head .plus { color: var(--accent); }
+  .a-section-body { margin-top: 8px; }
+  .a-tags { display: flex; gap: 6px; margin-right: 4px; }
+
+  /* ================= Variant B: card grid + modal ================= */
+  .b-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .b-toolbar h2 { font-size: 15px; margin: 0; color: var(--ink-soft); font-weight: 600; }
+  .b-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .b-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 14px; position: relative; box-shadow: var(--shadow);
+  }
+  .b-card .b-tags { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; font-size: 13px; }
+  .b-card h3 { margin: 0 26px 8px 0; font-size: 15px; }
+  .b-card .b-excerpt { font-size: 12px; color: var(--ink-soft); line-height: 1.5; min-height: 34px; }
+  .b-card .b-completeness { display: flex; gap: 4px; margin-top: 10px; }
+  .b-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
+  .b-dot.filled { background: var(--accent); }
+  .b-card-actions {
+    display: flex; gap: 4px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line);
+  }
+  .b-card-actions .btn { flex: 1; font-size: 12.5px; padding: 6px; }
+  .b-add-card {
+    border: 1.5px dashed var(--line); border-radius: var(--radius); background: transparent;
+    display: flex; align-items: center; justify-content: center; min-height: 110px;
+    color: var(--ink-soft); font-weight: 600; font-size: 13.5px;
+  }
+  .b-add-card:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .b-overlay {
+    position: fixed; inset: 0; background: rgba(30,24,18,0.35);
+    display: flex; align-items: flex-start; justify-content: center; padding-top: 8vh; z-index: 500;
+  }
+  .b-modal {
+    background: var(--panel); border-radius: 14px; width: 480px; max-width: 92vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.25); max-height: 82vh; overflow-y: auto;
+  }
+  .b-modal-body { padding: 22px 24px 8px; }
+  .b-modal .b-title-input { width: 100%; font-size: 18px; font-weight: 600; padding: 10px 12px; }
+  .b-modal .required-note { font-size: 11.5px; color: var(--ink-soft); margin: 6px 2px 16px; }
+  .b-modal .b-tag-row { display: flex; gap: 8px; margin-bottom: 18px; }
+  .b-more-toggle {
+    display: flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 600;
+    font-size: 13.5px; padding: 8px 0; border-top: 1px solid var(--line);
+  }
+  .b-more-toggle .chev { transition: transform .15s; }
+  .b-more-block { padding-bottom: 6px; }
+  .b-more-caption { font-size: 12px; color: var(--ink-soft); margin: 4px 0 12px; }
+  .b-field { margin-bottom: 14px; }
+  .b-field label { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); margin-bottom: 5px; }
+  .b-modal-footer {
+    display: flex; justify-content: flex-end; gap: 8px; padding: 14px 24px; border-top: 1px solid var(--line);
+    position: sticky; bottom: 0; background: var(--panel);
+  }
+
+  /* ================= Variant C: table + wizard ================= */
+  .c-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .c-toolbar h2 { font-size: 15px; margin: 0; color: var(--ink-soft); font-weight: 600; }
+  table.c-table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+  table.c-table th {
+    text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--ink-soft); padding: 10px 14px; border-bottom: 1px solid var(--line); background: #fbf8f3;
+  }
+  table.c-table td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; font-size: 13.5px; }
+  table.c-table tr:last-child td { border-bottom: none; }
+  table.c-table tr:hover td { background: #fbf8f3; }
+  .c-title-btn { background: none; border: none; padding: 0; font: inherit; font-weight: 600; color: var(--ink); cursor: pointer; text-align: left; }
+  .c-title-btn:hover { color: var(--accent); text-decoration: underline; }
+  .c-badges { display: flex; gap: 5px; flex-wrap: wrap; }
+  .c-badge { font-size: 10.5px; padding: 2px 6px; border-radius: 5px; border: 1px solid var(--line); color: var(--ink-soft); }
+  .c-badge.filled { border-color: #cfe3da; background: #eef6f2; color: var(--stable); font-weight: 600; }
+  .c-tags-cell { display: flex; gap: 4px; }
+  .c-actions-cell { display: flex; gap: 2px; justify-content: flex-end; }
+
+  .c-panel-overlay { position: fixed; inset: 0; background: rgba(30,24,18,0.28); z-index: 500; }
+  .c-panel {
+    position: fixed; top: 0; right: 0; bottom: 0; width: 420px; max-width: 92vw;
+    background: var(--panel); box-shadow: -12px 0 40px rgba(0,0,0,0.18);
+    display: flex; flex-direction: column; z-index: 501;
+  }
+  .c-panel-head { padding: 18px 22px 12px; border-bottom: 1px solid var(--line); }
+  .c-panel-head .close { float: right; }
+  .c-dots { display: flex; gap: 8px; margin-top: 14px; }
+  .c-dot-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; cursor: pointer; }
+  .c-dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line); display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--ink-soft); background: var(--panel); }
+  .c-dot.active { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+  .c-dot.done { border-color: var(--stable); background: var(--stable); color: #fff; }
+  .c-dot-wrap span.lbl { font-size: 10px; color: var(--ink-soft); text-align: center; }
+  .c-dot-wrap.locked { cursor: not-allowed; opacity: .5; }
+  .c-panel-body { padding: 20px 22px; flex: 1; overflow-y: auto; }
+  .c-step-title { font-size: 15px; font-weight: 700; margin: 0 0 4px; }
+  .c-step-sub { font-size: 12.5px; color: var(--ink-soft); margin: 0 0 16px; }
+  .c-panel-footer { padding: 14px 22px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; }
+</style>
+</head>
+<body>
+
+<header class="page">
+  <h1>Dish Library</h1>
+  <p>Your household's shared collection of meals. Add a dish with just a title — fill in the rest whenever you feel like it.</p>
+  <span class="variant-tag" id="variant-name"></span>
+</header>
+
+<main id="variant-root"></main>
+
+<div id="proto-switcher">
+  <button id="proto-prev" title="Previous variant (←)">&#8592;</button>
+  <div class="label" id="proto-label"></div>
+  <button id="proto-next" title="Next variant (→)">&#8594;</button>
+  <div class="sep"></div>
+  <button class="empty-toggle" id="proto-empty-toggle" title="Toggle empty-state demo"></button>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------------- shared data model ---------------- */
+  function uid() { return "d" + Math.random().toString(36).slice(2, 9); }
+
+  function seedDishes() {
+    return [
+      { id: uid(), title: "Spaghetti Bolognese", tags: { favourite: false, stable: true },
+        ingredients: "Beef mince, tinned tomatoes, onion, garlic, carrot, spaghetti, parmesan",
+        recipe: "Soften onion/garlic/carrot. Brown mince. Add tomatoes, simmer 40 min. Serve over pasta.",
+        variants: "" },
+      { id: uid(), title: "Sunday Roast Chicken", tags: { favourite: true, stable: false },
+        ingredients: "Whole chicken, potatoes, carrots, butter, thyme",
+        recipe: "Roast at 200°C for ~1h20, basting halfway. Rest 15 min before carving.",
+        variants: "Swap potatoes for parsnips. Add lemon + garlic under the skin." },
+      { id: uid(), title: "Pancakes", tags: { favourite: true, stable: true },
+        ingredients: "Flour, eggs, milk, butter, sugar, pinch of salt",
+        recipe: "", variants: "" },
+      { id: uid(), title: "Veggie Stir-fry", tags: { favourite: false, stable: false },
+        ingredients: "", recipe: "", variants: "" },
+      { id: uid(), title: "Homemade Pizza", tags: { favourite: true, stable: false },
+        ingredients: "",
+        recipe: "Stretch dough, top with tomato + mozzarella, bake at max oven temp ~8 min.",
+        variants: "Swap mozzarella for taleggio + honey. Add nduja for a spicy version." }
+    ];
+  }
+
+  var dishes = seedDishes();
+  var showEmpty = false;
+
+  var Store = {
+    all: function () { return showEmpty ? [] : dishes; },
+    add: function (partial) {
+      var d = { id: uid(), title: "", tags: { favourite: false, stable: false },
+        ingredients: "", recipe: "", variants: "" };
+      Object.assign(d, partial);
+      dishes.push(d);
+      return d;
+    },
+    update: function (id, patch) {
+      var d = dishes.find(function (x) { return x.id === id; });
+      if (d) Object.assign(d, patch);
+      return d;
+    },
+    remove: function (id) {
+      dishes = dishes.filter(function (x) { return x.id !== id; });
+    },
+    toggleTag: function (id, tag) {
+      var d = dishes.find(function (x) { return x.id === id; });
+      if (d) d.tags[tag] = !d.tags[tag];
+    },
+    get: function (id) { return dishes.find(function (x) { return x.id === id; }); }
+  };
+
+  function esc(s) {
+    return String(s || "").replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function tagChip(active, cls, icon, label) {
+    return '<span class="tag-chip ' + (active ? "on " + cls : "") + '">' + icon + " " + label + "</span>";
+  }
+  function completeness(d) {
+    var n = 0;
+    if (d.ingredients) n++;
+    if (d.recipe) n++;
+    if (d.variants) n++;
+    return n;
+  }
+
+  /* ================= Variant A: inline accordion list ================= */
+  function renderA(root) {
+    var state = { expandedId: null, sectionOpen: {} };
+
+    function rerender() {
+      var list = Store.all();
+      var html = "";
+      html += '<div class="a-add-row">' +
+        '<input type="text" id="a-new-title" placeholder="Add a dish… just the title, hit Enter" />' +
+        '<button class="btn primary" id="a-add-btn">+ Add dish</button></div>';
+
+      if (list.length === 0) {
+        html += '<div class="empty-state"><p>No dishes yet. Type a title above and hit Enter — everything else is optional, add it later.</p></div>';
+      } else {
+        html += '<div class="a-list">';
+        list.forEach(function (d) {
+          var expanded = state.expandedId === d.id;
+          html += '<div class="a-row" data-id="' + d.id + '">';
+          html += '<div class="a-row-head" data-action="toggle-row">';
+          html += '<span class="a-chevron">' + (expanded ? "▾" : "▸") + '</span>';
+          html += '<span class="title">' + esc(d.title) + '</span>';
+          html += '<span class="a-tags">' +
+            '<span data-action="tag-fav" data-stop="1">' + tagChip(d.tags.favourite, "fav", "⭐", "") + '</span>' +
+            '<span data-action="tag-stable" data-stop="1">' + tagChip(d.tags.stable, "stable", "🔁", "") + '</span>' +
+            '</span>';
+          html += '<span class="meta">' + completeness(d) + '/3 details</span>';
+          html += '<span class="a-row-actions">' +
+            '<button class="btn ghost" data-action="delete" data-stop="1" title="Delete">🗑</button></span>';
+          html += '</div>';
+
+          if (expanded) {
+            html += '<div class="a-row-body">';
+            html += accordionSection(d, "ingredients", "Ingredients");
+            html += accordionSection(d, "recipe", "Recipe / instructions");
+            html += accordionSection(d, "variants", "Variants & substitutes");
+            html += '</div>';
+          }
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+      root.innerHTML = html;
+      wire();
+    }
+
+    function accordionSection(d, field, label) {
+      var open = !!state.sectionOpen[d.id + ":" + field];
+      var filled = !!d[field];
+      var s = '<div class="a-section" data-field="' + field + '">';
+      s += '<div class="a-section-head" data-action="toggle-section" data-field="' + field + '">';
+      s += '<span>' + (filled ? "✓ " : "") + label + '</span>';
+      s += '<span class="plus">' + (open ? "−" : (filled ? "edit" : "+ add")) + '</span>';
+      s += '</div>';
+      if (open) {
+        s += '<div class="a-section-body"><textarea data-field="' + field + '" placeholder="' + label + '…">' + esc(d[field]) + '</textarea></div>';
+      }
+      s += '</div>';
+      return s;
+    }
+
+    function wire() {
+      var addBtn = root.querySelector("#a-add-btn");
+      var addInput = root.querySelector("#a-new-title");
+      function doAdd() {
+        var v = addInput.value.trim();
+        if (!v) return;
+        var d = Store.add({ title: v });
+        state.expandedId = d.id;
+        rerender();
+      }
+      if (addBtn) addBtn.addEventListener("click", doAdd);
+      if (addInput) addInput.addEventListener("keydown", function (e) { if (e.key === "Enter") doAdd(); });
+
+      root.querySelectorAll(".a-row-head").forEach(function (head) {
+        head.addEventListener("click", function (e) {
+          var stopEl = e.target.closest('[data-stop="1"]');
+          var row = head.closest(".a-row");
+          var id = row.getAttribute("data-id");
+          if (stopEl) {
+            var action = stopEl.getAttribute("data-action");
+            if (action === "tag-fav") Store.toggleTag(id, "favourite");
+            if (action === "tag-stable") Store.toggleTag(id, "stable");
+            if (action === "delete") { if (confirm("Delete this dish?")) Store.remove(id); }
+            rerender();
+            return;
+          }
+          state.expandedId = state.expandedId === id ? null : id;
+          rerender();
+        });
+      });
+
+      root.querySelectorAll('[data-action="toggle-section"]').forEach(function (el) {
+        el.addEventListener("click", function () {
+          var row = el.closest(".a-row");
+          var id = row.getAttribute("data-id");
+          var field = el.getAttribute("data-field");
+          var key = id + ":" + field;
+          state.sectionOpen[key] = !state.sectionOpen[key];
+          rerender();
+        });
+      });
+
+      root.querySelectorAll(".a-row-body textarea").forEach(function (ta) {
+        ta.addEventListener("input", function () {
+          var row = ta.closest(".a-row");
+          var id = row.getAttribute("data-id");
+          var field = ta.getAttribute("data-field");
+          Store.update(id, objWithField(field, ta.value));
+        });
+      });
+    }
+
+    function objWithField(field, value) { var o = {}; o[field] = value; return o; }
+
+    rerender();
+  }
+
+  /* ================= Variant B: card grid + modal ================= */
+  function renderB(root) {
+    var state = { modal: null }; // { mode: 'add'|'edit', draft: {...}, moreOpen: bool }
+
+    function rerender() {
+      var list = Store.all();
+      var html = '<div class="b-toolbar"><h2>' + list.length + ' dish' + (list.length === 1 ? "" : "es") + '</h2>' +
+        '<button class="btn primary" id="b-add">+ Add Dish</button></div>';
+
+      if (list.length === 0) {
+        html += '<button class="empty-state" id="b-add-empty" style="width:100%;border:1.5px dashed var(--line);cursor:pointer;">' +
+          '<p>No dishes yet.</p><span class="btn primary" style="pointer-events:none;">+ Add your first dish</span></button>';
+      } else {
+        html += '<div class="b-grid">';
+        list.forEach(function (d) {
+          var excerpt = d.recipe || d.ingredients || d.variants || "";
+          html += '<div class="b-card" data-id="' + d.id + '">';
+          html += '<div class="b-tags">' + (d.tags.favourite ? "⭐" : "") + (d.tags.stable ? "🔁" : "") + '</div>';
+          html += '<h3>' + esc(d.title) + '</h3>';
+          html += '<div class="b-excerpt">' + (excerpt ? esc(excerpt.slice(0, 70)) + (excerpt.length > 70 ? "…" : "") : '<em style="opacity:.6">No extra detail added yet</em>') + '</div>';
+          html += '<div class="b-card-actions">' +
+            '<button class="btn" data-action="edit">Edit</button>' +
+            '<button class="btn danger" data-action="delete">Delete</button></div>';
+          html += '</div>';
+        });
+        html += '<button class="b-add-card" id="b-add-card">+ Add Dish</button>';
+        html += '</div>';
+      }
+
+      if (state.modal) html += renderModal();
+      root.innerHTML = html;
+      wire();
+    }
+
+    function renderModal() {
+      var d = state.modal.draft;
+      var titleOk = d.title.trim().length > 0;
+      var m = '<div class="b-overlay" id="b-overlay"><div class="b-modal">';
+      m += '<div class="b-modal-body">';
+      m += '<input type="text" class="b-title-input" id="b-title" placeholder="Dish title" value="' + esc(d.title) + '" />';
+      m += '<div class="required-note">Title is the only required field.</div>';
+      m += '<div class="b-tag-row">' +
+        '<button class="tag-chip ' + (d.tags.favourite ? "on fav" : "") + '" data-action="tag-fav">⭐ Favourite</button>' +
+        '<button class="tag-chip ' + (d.tags.stable ? "on stable" : "") + '" data-action="tag-stable">🔁 Stable</button></div>';
+
+      m += '<div class="b-more-toggle" id="b-more-toggle">' +
+        '<span class="chev">' + (state.modal.moreOpen ? "−" : "+") + '</span>' +
+        '<span>Add more detail (optional)</span></div>';
+
+      if (state.modal.moreOpen) {
+        m += '<div class="b-more-block">';
+        m += '<div class="b-more-caption">Totally optional — leave any of these blank and add them later.</div>';
+        m += field("ingredients", "Ingredients", d.ingredients);
+        m += field("recipe", "Recipe / instructions", d.recipe);
+        m += field("variants", "Variants & substitutes", d.variants);
+        m += '</div>';
+      }
+      m += '</div>';
+      m += '<div class="b-modal-footer">' +
+        '<button class="btn ghost" id="b-cancel">Cancel</button>' +
+        '<button class="btn primary" id="b-save"' + (titleOk ? "" : " disabled") + '>Save</button></div>';
+      m += '</div></div>';
+      return m;
+
+      function field(key, label, val) {
+        return '<div class="b-field"><label>' + label + '</label><textarea data-field="' + key + '">' + esc(val) + '</textarea></div>';
+      }
+    }
+
+    function openAdd() {
+      state.modal = { mode: "add", moreOpen: false,
+        draft: { title: "", tags: { favourite: false, stable: false }, ingredients: "", recipe: "", variants: "" } };
+      rerender();
+      var t = root.querySelector("#b-title"); if (t) t.focus();
+    }
+    function openEdit(id) {
+      var d = Store.get(id);
+      var hasDetail = !!(d.ingredients || d.recipe || d.variants);
+      state.modal = { mode: "edit", id: id, moreOpen: hasDetail,
+        draft: { title: d.title, tags: { favourite: d.tags.favourite, stable: d.tags.stable },
+          ingredients: d.ingredients, recipe: d.recipe, variants: d.variants } };
+      rerender();
+    }
+
+    function wire() {
+      var addBtn = root.querySelector("#b-add"); if (addBtn) addBtn.addEventListener("click", openAdd);
+      var addCard = root.querySelector("#b-add-card"); if (addCard) addCard.addEventListener("click", openAdd);
+      var addEmpty = root.querySelector("#b-add-empty"); if (addEmpty) addEmpty.addEventListener("click", openAdd);
+
+      root.querySelectorAll(".b-card").forEach(function (card) {
+        var id = card.getAttribute("data-id");
+        card.querySelector('[data-action="edit"]').addEventListener("click", function () { openEdit(id); });
+        card.querySelector('[data-action="delete"]').addEventListener("click", function () {
+          if (confirm("Delete this dish?")) { Store.remove(id); rerender(); }
+        });
+      });
+
+      if (!state.modal) return;
+      var overlay = root.querySelector("#b-overlay");
+      overlay.addEventListener("click", function (e) { if (e.target === overlay) { state.modal = null; rerender(); } });
+      root.querySelector("#b-cancel").addEventListener("click", function () { state.modal = null; rerender(); });
+      root.querySelector("#b-title").addEventListener("input", function (e) {
+        state.modal.draft.title = e.target.value;
+        var saveBtn = root.querySelector("#b-save");
+        saveBtn.disabled = state.modal.draft.title.trim().length === 0;
+      });
+      root.querySelector('[data-action="tag-fav"]').addEventListener("click", function () {
+        state.modal.draft.tags.favourite = !state.modal.draft.tags.favourite; rerender();
+      });
+      root.querySelector('[data-action="tag-stable"]').addEventListener("click", function () {
+        state.modal.draft.tags.stable = !state.modal.draft.tags.stable; rerender();
+      });
+      root.querySelector("#b-more-toggle").addEventListener("click", function () {
+        state.modal.moreOpen = !state.modal.moreOpen; rerender();
+        if (state.modal.moreOpen) root.querySelector("#b-title").focus();
+      });
+      root.querySelectorAll(".b-modal textarea").forEach(function (ta) {
+        ta.addEventListener("input", function () { state.modal.draft[ta.getAttribute("data-field")] = ta.value; });
+      });
+      var saveBtn = root.querySelector("#b-save");
+      if (saveBtn) saveBtn.addEventListener("click", function () {
+        var d = state.modal.draft;
+        if (!d.title.trim()) return;
+        if (state.modal.mode === "add") Store.add(d); else Store.update(state.modal.id, d);
+        state.modal = null;
+        rerender();
+      });
+    }
+
+    rerender();
+  }
+
+  /* ================= Variant C: table + step wizard ================= */
+  function renderC(root) {
+    var STEPS = [
+      { key: "title", label: "Title" },
+      { key: "ingredients", label: "Ingredients" },
+      { key: "recipe", label: "Recipe" },
+      { key: "variants", label: "Variants" }
+    ];
+    var state = { panel: null }; // { id: existingId|null, step: 0, draft: {...} }
+
+    function rerender() {
+      var list = Store.all();
+      var html = '<div class="c-toolbar"><h2>' + list.length + ' dish' + (list.length === 1 ? "" : "es") + '</h2>' +
+        '<button class="btn primary" id="c-new">+ New dish</button></div>';
+
+      if (list.length === 0) {
+        html += '<div class="empty-state"><p>No dishes yet.</p><button class="btn primary" id="c-new-empty">+ New dish</button></div>';
+      } else {
+        html += '<table class="c-table"><thead><tr><th>Title</th><th>Tags</th><th>Details</th><th></th></tr></thead><tbody>';
+        list.forEach(function (d) {
+          html += '<tr data-id="' + d.id + '">';
+          html += '<td><button class="c-title-btn" data-action="edit">' + esc(d.title) + '</button></td>';
+          html += '<td class="c-tags-cell">' +
+            '<span data-action="tag-fav">' + tagChip(d.tags.favourite, "fav", "⭐", "") + '</span>' +
+            '<span data-action="tag-stable">' + tagChip(d.tags.stable, "stable", "🔁", "") + '</span></td>';
+          html += '<td><div class="c-badges">' +
+            badge("Ingredients", !!d.ingredients) + badge("Recipe", !!d.recipe) + badge("Variants", !!d.variants) + '</div></td>';
+          html += '<td class="c-actions-cell"><button class="btn ghost" data-action="delete" title="Delete">🗑</button></td>';
+          html += '</tr>';
+        });
+        html += '</tbody></table>';
+      }
+
+      if (state.panel) html += renderPanel();
+      root.innerHTML = html;
+      wire();
+    }
+
+    function badge(label, filled) {
+      return '<span class="c-badge' + (filled ? " filled" : "") + '">' + (filled ? "✓ " : "") + label + '</span>';
+    }
+
+    function renderPanel() {
+      var p = state.panel, step = STEPS[p.step], isTitle = step.key === "title";
+      var titleOk = p.draft.title.trim().length > 0;
+      var html = '<div class="c-panel-overlay" id="c-overlay"></div><div class="c-panel">';
+      html += '<div class="c-panel-head"><button class="btn ghost close" id="c-close">✕</button>' +
+        '<strong>' + (p.id ? "Edit dish" : "New dish") + '</strong>';
+      html += '<div class="c-dots">';
+      STEPS.forEach(function (s, i) {
+        var locked = !p.id && i > 0 && !p.createdOnce;
+        var cls = i === p.step ? "active" : (isStepFilled(p, s.key) ? "done" : "");
+        html += '<div class="c-dot-wrap' + (locked ? " locked" : "") + '" data-step="' + i + '">' +
+          '<div class="c-dot ' + cls + '">' + (isStepFilled(p, s.key) && i !== p.step ? "✓" : i + 1) + '</div>' +
+          '<span class="lbl">' + s.label + '</span></div>';
+      });
+      html += '</div></div>';
+
+      html += '<div class="c-panel-body">';
+      if (isTitle) {
+        html += '<div class="c-step-title">What\'s it called?</div>';
+        html += '<div class="c-step-sub">Required. Everything after this is optional — add it now or come back later.</div>';
+        html += '<input type="text" id="c-title" placeholder="Dish title" value="' + esc(p.draft.title) + '" style="width:100%" />';
+        html += '<div style="margin-top:16px;display:flex;gap:8px;">' +
+          '<span data-action="tag-fav">' + tagChip(p.draft.tags.favourite, "fav", "⭐", "Favourite") + '</span>' +
+          '<span data-action="tag-stable">' + tagChip(p.draft.tags.stable, "stable", "🔁", "Stable") + '</span></div>';
+      } else {
+        var labelMap = { ingredients: "Ingredients", recipe: "Recipe / instructions", variants: "Variants & substitutes" };
+        html += '<div class="c-step-title">' + labelMap[step.key] + '</div>';
+        html += '<div class="c-step-sub">Optional — skip it if you don\'t have this yet.</div>';
+        html += '<textarea id="c-field" style="min-height:160px" placeholder="' + labelMap[step.key] + '…">' + esc(p.draft[step.key]) + '</textarea>';
+      }
+      html += '</div>';
+
+      html += '<div class="c-panel-footer">';
+      html += '<div>' + (p.step > 0 ? '<button class="btn ghost" id="c-back">← Back</button>' : '') + '</div>';
+      html += '<div style="display:flex;gap:8px;">';
+      if (isTitle) {
+        html += '<button class="btn primary" id="c-save-continue"' + (titleOk ? "" : " disabled") + '>' +
+          (p.step === STEPS.length - 1 ? "Save" : "Save & continue →") + '</button>';
+      } else {
+        html += '<button class="btn ghost" id="c-skip">Skip</button>';
+        html += '<button class="btn primary" id="c-next">' + (p.step === STEPS.length - 1 ? "Finish" : "Next →") + '</button>';
+      }
+      html += '</div></div>';
+      html += '</div>';
+      return html;
+    }
+
+    function isStepFilled(p, key) {
+      if (key === "title") return p.draft.title.trim().length > 0 && (p.id || p.createdOnce);
+      return !!p.draft[key];
+    }
+
+    function openNew() {
+      state.panel = { id: null, step: 0, createdOnce: false,
+        draft: { title: "", tags: { favourite: false, stable: false }, ingredients: "", recipe: "", variants: "" } };
+      rerender();
+      var t = root.querySelector("#c-title"); if (t) t.focus();
+    }
+    function openEdit(id) {
+      var d = Store.get(id);
+      state.panel = { id: id, step: 0, createdOnce: true,
+        draft: { title: d.title, tags: { favourite: d.tags.favourite, stable: d.tags.stable },
+          ingredients: d.ingredients, recipe: d.recipe, variants: d.variants } };
+      rerender();
+    }
+    function commit(p) {
+      if (p.id) { Store.update(p.id, p.draft); }
+      else { var d = Store.add(p.draft); p.id = d.id; p.createdOnce = true; }
+    }
+
+    function wire() {
+      var nb = root.querySelector("#c-new"); if (nb) nb.addEventListener("click", openNew);
+      var nbe = root.querySelector("#c-new-empty"); if (nbe) nbe.addEventListener("click", openNew);
+
+      root.querySelectorAll("tr[data-id]").forEach(function (tr) {
+        var id = tr.getAttribute("data-id");
+        tr.querySelector('[data-action="edit"]').addEventListener("click", function () { openEdit(id); });
+        tr.querySelector('[data-action="tag-fav"]').addEventListener("click", function () { Store.toggleTag(id, "favourite"); rerender(); });
+        tr.querySelector('[data-action="tag-stable"]').addEventListener("click", function () { Store.toggleTag(id, "stable"); rerender(); });
+        tr.querySelector('[data-action="delete"]').addEventListener("click", function () {
+          if (confirm("Delete this dish?")) { Store.remove(id); rerender(); }
+        });
+      });
+
+      if (!state.panel) return;
+      var p = state.panel;
+      root.querySelector("#c-overlay").addEventListener("click", function () { state.panel = null; rerender(); });
+      root.querySelector("#c-close").addEventListener("click", function () { state.panel = null; rerender(); });
+
+      root.querySelectorAll(".c-dot-wrap").forEach(function (dw) {
+        dw.addEventListener("click", function () {
+          var i = parseInt(dw.getAttribute("data-step"), 10);
+          if (i > 0 && !p.id && !p.createdOnce) return;
+          p.step = i; rerender();
+        });
+      });
+
+      var titleInput = root.querySelector("#c-title");
+      if (titleInput) titleInput.addEventListener("input", function (e) {
+        p.draft.title = e.target.value;
+        var btn = root.querySelector("#c-save-continue");
+        if (btn) btn.disabled = p.draft.title.trim().length === 0;
+      });
+      var fieldInput = root.querySelector("#c-field");
+      if (fieldInput) fieldInput.addEventListener("input", function (e) { p.draft[STEPS[p.step].key] = e.target.value; });
+
+      var favEl = root.querySelector('[data-action="tag-fav"]');
+      if (favEl) favEl.addEventListener("click", function () { p.draft.tags.favourite = !p.draft.tags.favourite; rerender(); });
+      var stableEl = root.querySelector('[data-action="tag-stable"]');
+      if (stableEl) stableEl.addEventListener("click", function () { p.draft.tags.stable = !p.draft.tags.stable; rerender(); });
+
+      var back = root.querySelector("#c-back");
+      if (back) back.addEventListener("click", function () { p.step = Math.max(0, p.step - 1); rerender(); });
+      var saveContinue = root.querySelector("#c-save-continue");
+      if (saveContinue) saveContinue.addEventListener("click", function () {
+        if (!p.draft.title.trim()) return;
+        commit(p);
+        if (p.step === STEPS.length - 1) { state.panel = null; } else { p.step++; }
+        rerender();
+      });
+      var skip = root.querySelector("#c-skip");
+      if (skip) skip.addEventListener("click", function () {
+        commit(p);
+        if (p.step === STEPS.length - 1) { state.panel = null; } else { p.step++; }
+        rerender();
+      });
+      var next = root.querySelector("#c-next");
+      if (next) next.addEventListener("click", function () {
+        commit(p);
+        if (p.step === STEPS.length - 1) { state.panel = null; } else { p.step++; }
+        rerender();
+      });
+    }
+
+    rerender();
+  }
+
+  /* ---------------- switcher + boot ---------------- */
+  var VARIANTS = {
+    A: { name: "Inline accordion list", fn: renderA },
+    B: { name: "Card grid + modal", fn: renderB },
+    C: { name: "Table + step wizard", fn: renderC }
+  };
+  var ORDER = ["A", "B", "C"];
+  var currentVariant = null; // fallback when history.replaceState is unavailable (e.g. some file:// contexts)
+
+  function getVariant() {
+    if (VARIANTS[currentVariant]) return currentVariant;
+    var v = new URLSearchParams(location.search).get("variant");
+    return VARIANTS[v] ? v : "A";
+  }
+  function setVariant(v) {
+    try {
+      var url = new URL(location.href);
+      url.searchParams.set("variant", v);
+      history.replaceState(null, "", url);
+    } catch (e) {
+      // some browsers restrict history updates on file:// origins — fine,
+      // just means the variant won't be reflected in the address bar.
+    }
+    currentVariant = v;
+    boot();
+  }
+
+  function boot() {
+    var v = getVariant();
+    document.getElementById("variant-name").textContent = "Variant " + v + " — " + VARIANTS[v].name;
+    document.getElementById("proto-label").innerHTML = "Variant <b>" + v + "</b> — " + VARIANTS[v].name;
+    document.getElementById("proto-empty-toggle").textContent = showEmpty ? "Show seeded dishes" : "Show empty state";
+    var root = document.getElementById("variant-root");
+    root.innerHTML = "";
+    VARIANTS[v].fn(root);
+  }
+
+  document.getElementById("proto-prev").addEventListener("click", function () {
+    var i = ORDER.indexOf(getVariant());
+    setVariant(ORDER[(i - 1 + ORDER.length) % ORDER.length]);
+  });
+  document.getElementById("proto-next").addEventListener("click", function () {
+    var i = ORDER.indexOf(getVariant());
+    setVariant(ORDER[(i + 1) % ORDER.length]);
+  });
+  document.getElementById("proto-empty-toggle").addEventListener("click", function () {
+    showEmpty = !showEmpty;
+    boot();
+  });
+  document.addEventListener("keydown", function (e) {
+    var tag = (e.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || e.target.isContentEditable) return;
+    if (e.key === "ArrowLeft") document.getElementById("proto-prev").click();
+    if (e.key === "ArrowRight") document.getElementById("proto-next").click();
+  });
+
+  boot();
+})();
+</script>
+</body>
+</html>
