@@ -161,18 +161,19 @@
   .b-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
   .b-card {
     background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
-    padding: 14px; position: relative; box-shadow: var(--shadow);
+    padding: 14px; position: relative; box-shadow: var(--shadow); cursor: pointer;
   }
-  .b-card .b-tags { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; font-size: 13px; }
-  .b-card h3 { margin: 0 26px 8px 0; font-size: 15px; }
+  .b-card:hover { border-color: #d8cabb; }
+  .b-card-delete {
+    position: absolute; top: 8px; right: 8px; border: none; background: transparent;
+    color: var(--ink-soft); width: 26px; height: 26px; border-radius: 6px; font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .b-card-delete:hover { background: #fbeaea; color: #a83232; }
+  .b-card h3 { margin: 0 30px 6px 0; font-size: 15px; }
+  .b-card .b-tags-row { display: flex; gap: 6px; margin-bottom: 8px; min-height: 20px; }
+  .b-card .b-tags-row .b-no-tags { font-size: 11.5px; color: var(--ink-soft); opacity: .55; }
   .b-card .b-excerpt { font-size: 12px; color: var(--ink-soft); line-height: 1.5; min-height: 34px; }
-  .b-card .b-completeness { display: flex; gap: 4px; margin-top: 10px; }
-  .b-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
-  .b-dot.filled { background: var(--accent); }
-  .b-card-actions {
-    display: flex; gap: 4px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line);
-  }
-  .b-card-actions .btn { flex: 1; font-size: 12.5px; padding: 6px; }
   .b-add-card {
     border: 1.5px dashed var(--line); border-radius: var(--radius); background: transparent;
     display: flex; align-items: center; justify-content: center; min-height: 110px;
@@ -468,13 +469,13 @@
         html += '<div class="b-grid">';
         list.forEach(function (d) {
           var excerpt = d.recipe || d.ingredients || d.variants || "";
+          var tagLabels = (d.tags.favourite ? tagChip(true, "fav", "⭐", "Favourite") : "") +
+            (d.tags.stable ? tagChip(true, "stable", "🔁", "Stable") : "");
           html += '<div class="b-card" data-id="' + d.id + '">';
-          html += '<div class="b-tags">' + (d.tags.favourite ? "⭐" : "") + (d.tags.stable ? "🔁" : "") + '</div>';
+          html += '<button class="b-card-delete" data-action="delete" title="Delete">🗑</button>';
           html += '<h3>' + esc(d.title) + '</h3>';
+          html += '<div class="b-tags-row">' + (tagLabels || '<span class="b-no-tags">No tags</span>') + '</div>';
           html += '<div class="b-excerpt">' + (excerpt ? esc(excerpt.slice(0, 70)) + (excerpt.length > 70 ? "…" : "") : '<em style="opacity:.6">No extra detail added yet</em>') + '</div>';
-          html += '<div class="b-card-actions">' +
-            '<button class="btn" data-action="edit">Edit</button>' +
-            '<button class="btn danger" data-action="delete">Delete</button></div>';
           html += '</div>';
         });
         html += '<button class="b-add-card" id="b-add-card">+ Add Dish</button>';
@@ -543,8 +544,12 @@
 
       root.querySelectorAll(".b-card").forEach(function (card) {
         var id = card.getAttribute("data-id");
-        card.querySelector('[data-action="edit"]').addEventListener("click", function () { openEdit(id); });
-        card.querySelector('[data-action="delete"]').addEventListener("click", function () {
+        card.addEventListener("click", function (e) {
+          if (e.target.closest('[data-action="delete"]')) return;
+          openEdit(id);
+        });
+        card.querySelector('[data-action="delete"]').addEventListener("click", function (e) {
+          e.stopPropagation();
           if (confirm("Delete this dish?")) { Store.remove(id); rerender(); }
         });
       });
