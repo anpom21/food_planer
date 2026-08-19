@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PROTOTYPE — Settings screen</title>
+<!--
+  PROTOTYPE — throwaway. Answers: "what should the per-Profile Settings screen
+  look and behave like?" (issues/7, child of issues/1).
+
+  Three variants of the Settings screen, switchable via ?variant=, on a
+  throwaway static-HTML route — no frontend framework is locked in yet, so
+  this is plain HTML/CSS/JS rather than a React stub. Open this file directly
+  in a browser (double-click, or `open prototypes/settings-screen.prototype.html`).
+
+  Open questions this prototype is pressure-testing:
+    - Priority order (cheap / quick & easy / delicious / healthy): ranked
+      dropdowns vs. drag-to-reorder vs. weighted sliders?
+    - Preferred shops: freeform text vs. fixed Danish-chain list w/ "other"?
+    - Stables-vs-new preference: how should that be represented?
+
+  Not wired to anything real — no persistence, no backend. State is printed
+  live in the "Current PlanningSettings" panel on every change.
+-->
+<style>
+  :root {
+    --ink: #1c1c1e;
+    --muted: #6b6b70;
+    --line: #dcdcdf;
+    --bg: #f6f6f7;
+    --card: #ffffff;
+    --accent: #2f6f4f;
+    --accent-ink: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    padding-bottom: 100px;
+  }
+  header.app {
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+    padding: 14px 20px;
+  }
+  header.app .brand { font-weight: 700; font-size: 15px; }
+  header.app .crumb { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 24px 20px 40px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .hint { font-size: 12px; color: var(--muted); font-weight: 400; margin-top: 2px; }
+  .stepper {
+    display: inline-flex; align-items: stretch; border: 1px solid var(--line); border-radius: 8px;
+    overflow: hidden; background: var(--card);
+  }
+  .stepper input[type="number"] {
+    border: none; border-radius: 0; width: 56px; min-width: 56px; flex: 0 0 56px; padding: 9px 10px;
+    -moz-appearance: textfield;
+  }
+  .stepper input[type="number"]::-webkit-inner-spin-button,
+  .stepper input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .stepper .step-btn {
+    flex: 0 0 32px; width: 32px; min-width: 32px; border: none; border-left: 1px solid var(--line); background: var(--bg);
+    cursor: pointer; font-size: 15px; font-weight: 700; color: var(--ink);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .stepper .step-btn:hover { background: #e9e9ea; }
+  .stepper .step-btn:active { background: #dcdcdc; }
+
+  input[type="number"], input[type="text"], textarea, select {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    background: var(--card);
+  }
+  textarea { resize: vertical; min-height: 70px; }
+  .field { margin-bottom: 20px; }
+  .row { display: flex; gap: 16px; }
+  .row > .field { flex: 1; }
+
+  /* ---- state debug panel ---- */
+  #state-panel {
+    max-width: 880px;
+    margin: 0 auto 24px;
+    padding: 0 20px;
+  }
+  #state-panel pre {
+    background: #17181a;
+    color: #b9f6c3;
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    overflow-x: auto;
+    margin: 0;
+  }
+  #state-panel summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--muted);
+    padding: 8px 0;
+  }
+
+  /* ---- Variant A: plain single-column form ---- */
+  .variant-a section {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .variant-a .segmented { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .variant-a .segmented button {
+    flex: 1; padding: 9px; border: none; background: var(--card); cursor: pointer; font-size: 13px;
+    border-right: 1px solid var(--line);
+  }
+  .variant-a .segmented button:last-child { border-right: none; }
+  .variant-a .segmented button.active { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .variant-a .checklist { display: flex; flex-direction: column; gap: 8px; }
+  .variant-a .checklist label { display: flex; align-items: center; gap: 8px; font-weight: 400; font-size: 14px; }
+  .variant-a select.rank { width: auto; min-width: 60px; }
+  .variant-a .rank-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .variant-a .rank-row:last-child { border-bottom: none; }
+
+  /* ---- Variant B: two-column, drag list + chips ---- */
+  .variant-b { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .variant-b .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .variant-b .full { grid-column: 1 / -1; }
+  .variant-b ul.drag-list { list-style: none; margin: 0; padding: 0; }
+  .variant-b ul.drag-list li {
+    background: #f0f4f1; border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 8px; cursor: grab; font-size: 14px;
+    display: flex; align-items: center; gap: 10px; user-select: none;
+  }
+  .variant-b ul.drag-list li.dragging { opacity: 0.4; }
+  .variant-b ul.drag-list li .grip { color: var(--muted); font-size: 12px; }
+  .variant-b ul.drag-list li .rank-num {
+    background: var(--accent); color: var(--accent-ink); width: 20px; height: 20px;
+    border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+  }
+  .variant-b .slider-track { margin-top: 10px; }
+  .variant-b .slider-track input[type=range] { width: 100%; }
+  .variant-b .slider-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .variant-b .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; min-height: 28px; }
+  .variant-b .chip {
+    background: var(--accent); color: var(--accent-ink); border-radius: 999px;
+    padding: 4px 10px 4px 12px; font-size: 12px; display: flex; align-items: center; gap: 6px;
+  }
+  .variant-b .chip button { background: none; border: none; color: var(--accent-ink); cursor: pointer; font-size: 13px; line-height: 1; padding: 0; }
+  .variant-b .chip-input { display: flex; gap: 8px; }
+  .variant-b .chip-input input { flex: 1; }
+  .variant-b .chip-input button {
+    padding: 9px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent);
+    color: var(--accent-ink); font-size: 13px; cursor: pointer;
+  }
+
+  /* ---- Variant C: card grid, weighted sliders, pill shops ---- */
+  .variant-c { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .variant-c .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px; grid-column: span 1;
+  }
+  .variant-c .card.wide { grid-column: 1 / -1; }
+  .variant-c .card h3 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  .variant-c .weight-row { margin-bottom: 14px; }
+  .variant-c .weight-row .top { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+  .variant-c .weight-row .top .val { color: var(--accent); font-weight: 700; }
+  .variant-c .weight-bar { height: 8px; background: #eceeec; border-radius: 999px; overflow: hidden; margin-top: 6px; }
+  .variant-c .weight-bar > div { height: 100%; background: var(--accent); }
+  .variant-c input[type=range] { width: 100%; accent-color: var(--accent); }
+  .variant-c .toggle {
+    display: flex; align-items: center; justify-content: space-between; background: #f0f4f1;
+    border-radius: 10px; padding: 12px 14px;
+  }
+  .variant-c .switch { position: relative; width: 44px; height: 24px; }
+  .variant-c .switch input { opacity: 0; width: 0; height: 0; }
+  .variant-c .switch .track { position: absolute; inset: 0; background: var(--line); border-radius: 999px; cursor: pointer; transition: background 0.15s; }
+  .variant-c .switch input:checked + .track { background: var(--accent); }
+  .variant-c .switch .knob { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; background: #fff; border-radius: 50%; transition: left 0.15s; box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+  .variant-c .switch input:checked ~ .knob { left: 23px; }
+  .variant-c .pill-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .variant-c .pill {
+    padding: 6px 14px 6px 6px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg);
+    font-size: 13px; cursor: pointer; display: inline-flex; align-items: center;
+  }
+  .variant-c .pill.selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .variant-c .pill:not([data-shop]) { padding-left: 14px; } /* the "Other..." pill has no logo */
+  .variant-c .other-input { margin-top: 10px; }
+  .logo-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border-radius: 50%; font-size: 8px; font-weight: 800;
+    margin-right: 7px; flex-shrink: 0; letter-spacing: -0.02em;
+  }
+  .shop-icon-wrap { display: inline-flex; align-items: center; }
+  .shop-icon {
+    width: 20px; height: 20px; border-radius: 50%; object-fit: cover;
+    margin-right: 7px; flex-shrink: 0; vertical-align: middle; background: #fff;
+  }
+
+  /* ---- floating variant switcher ---- */
+  #switcher {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: #1c1c1e; color: #fff; border-radius: 999px;
+    padding: 8px 8px 8px 16px; display: flex; align-items: center; gap: 14px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25); z-index: 999; font-size: 13px;
+  }
+  #switcher button {
+    background: rgba(255,255,255,0.12); border: none; color: #fff; width: 30px; height: 30px;
+    border-radius: 50%; cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center;
+  }
+  #switcher button:hover { background: rgba(255,255,255,0.24); }
+  #switcher .label { min-width: 190px; text-align: center; }
+  #switcher .label b { display: block; font-size: 12px; opacity: 0.7; font-weight: 400; }
+</style>
+</head>
+<body>
+
+<header class="app">
+  <div class="brand">Food Planner</div>
+  <div class="crumb">Household → Profile: Andreas → Settings <em>(prototype)</em></div>
+</header>
+
+<main>
+  <h1>Planning Settings</h1>
+  <div class="sub">Per-profile settings used to configure a planning run. Prototype only — nothing here is saved.</div>
+  <div id="variant-root"></div>
+</main>
+
+<div id="state-panel">
+  <details open>
+    <summary>Current PlanningSettings (live state)</summary>
+    <pre id="state-json"></pre>
+  </details>
+</div>
+
+<div id="switcher">
+  <button id="prev" aria-label="Previous variant">&#8592;</button>
+  <div class="label" id="switcher-label"></div>
+  <button id="next" aria-label="Next variant">&#8594;</button>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var DANISH_CHAINS = ["Netto", "Rema 1000", "Føtex", "Bilka", "Lidl", "Aldi", "Coop 365", "SuperBrugsen", "Irma", "Meny"];
+
+  // Placeholder "logos" — colored initials, not real brand marks. No image
+  // assets or network access in this sandbox; swap for real logo SVGs
+  // before this goes anywhere near production (mind each chain's brand
+  // guidelines when sourcing them).
+  var SHOP_LOGOS = {
+    "Netto":        { abbr: "Ne", bg: "#FFD400", fg: "#111111" },
+    "Rema 1000":    { abbr: "R1", bg: "#0033A0", fg: "#ffffff" },
+    "Føtex":        { abbr: "Fø", bg: "#E5007D", fg: "#ffffff" },
+    "Bilka":        { abbr: "Bi", bg: "#E2001A", fg: "#ffffff" },
+    "Lidl":         { abbr: "Li", bg: "#0050AA", fg: "#FFD100" },
+    "Aldi":         { abbr: "Al", bg: "#00549F", fg: "#ffffff" },
+    "Coop 365":     { abbr: "Co", bg: "#00853E", fg: "#ffffff" },
+    "SuperBrugsen": { abbr: "SB", bg: "#DA291C", fg: "#ffffff" },
+    "Irma":         { abbr: "Ir", bg: "#FFCC00", fg: "#111111" },
+    "Meny":         { abbr: "Me", bg: "#EE1C25", fg: "#ffffff" }
+  };
+  function logoBadge(shop) {
+    var l = SHOP_LOGOS[shop];
+    if (!l) return "";
+    return '<span class="logo-badge" style="background:' + l.bg + ';color:' + l.fg + ';">' + l.abbr + '</span>';
+  }
+
+  // Real shop icons, loaded from ../data/icons/<slug>.<ext> — drop a file
+  // there named after the shop (e.g. data/icons/rema-1000.png) and it's
+  // picked up automatically, no code changes needed. Falls back to the
+  // colored-initial badge above if no file is found under any extension.
+  var ICON_DIR = "../data/icons/";
+  var ICON_EXTENSIONS = ["jpg", "jpeg", "png", "svg", "webp"];
+
+  function slugify(shop) {
+    return shop.toLowerCase()
+      .replace(/æ/g, "ae").replace(/ø/g, "o").replace(/å/g, "aa")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-+|-+$)/g, "");
+  }
+
+  function shopIconHtml(shop) {
+    var slug = slugify(shop);
+    var l = SHOP_LOGOS[shop] || { abbr: "?", bg: "#ccc", fg: "#000" };
+    return '<span class="shop-icon-wrap" data-slug="' + slug + '" data-ext="0">' +
+      '<img class="shop-icon" alt="" src="' + ICON_DIR + slug + "." + ICON_EXTENSIONS[0] + '">' +
+      '<span class="logo-badge" style="display:none;background:' + l.bg + ";color:" + l.fg + ';">' + l.abbr + '</span>' +
+    '</span>';
+  }
+
+  function bindShopIcons(container) {
+    container.querySelectorAll(".shop-icon-wrap").forEach(function (wrap) {
+      var img = wrap.querySelector("img.shop-icon");
+      var fallback = wrap.querySelector(".logo-badge");
+      if (!img) return;
+      img.addEventListener("error", function () {
+        var nextExt = Number(wrap.dataset.ext) + 1;
+        if (nextExt < ICON_EXTENSIONS.length) {
+          wrap.dataset.ext = nextExt;
+          img.src = ICON_DIR + wrap.dataset.slug + "." + ICON_EXTENSIONS[nextExt];
+        } else {
+          img.remove();
+          if (fallback) fallback.style.display = "";
+        }
+      });
+    });
+  }
+
+  function stepperField(id, label, value, min, max) {
+    return '<div class="field"><label for="' + id + '">' + label + '</label>' +
+      '<div class="stepper">' +
+        '<input type="number" id="' + id + '" min="' + min + '" max="' + max + '" value="' + value + '">' +
+        '<button type="button" class="step-btn step-dec" data-target="' + id + '" aria-label="Decrease">&minus;</button>' +
+        '<button type="button" class="step-btn step-inc" data-target="' + id + '" aria-label="Increase">+</button>' +
+      '</div></div>';
+  }
+
+  function bindSteppers(root) {
+    root.querySelectorAll(".step-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var input = root.querySelector("#" + btn.dataset.target);
+        if (!input) return;
+        var val = Number(input.value) || 0;
+        var lo = input.min !== "" ? Number(input.min) : -Infinity;
+        var hi = input.max !== "" ? Number(input.max) : Infinity;
+        val = btn.classList.contains("step-inc") ? Math.min(hi, val + 1) : Math.max(lo, val - 1);
+        input.value = val;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    });
+  }
+
+  var PRIORITIES = {
+    cheap: "Cheap",
+    quickEasy: "Quick & easy",
+    delicious: "Delicious",
+    healthy: "Healthy"
+  };
+
+  var VARIANTS = [
+    { key: "A", name: "Plain form — ranked dropdowns, checkbox shop list" },
+    { key: "B", name: "Two-column — drag-to-reorder priorities, chip shop input" },
+    { key: "C", name: "Card grid — weighted sliders, pill shop picker" },
+    { key: "D", name: "Recommended — B's boxed layout + C's shop pills w/ logos" }
+  ];
+
+  // ---- per-variant state (each variant owns its own representation of the
+  // open questions — that's the point of the prototype) ----
+  var state = {
+    A: {
+      days: 7,
+      suggestionsPerDay: 3,
+      stablesVsNew: "balanced", // "mostlyStables" | "balanced" | "mostlyNew"
+      ranks: { cheap: 1, quickEasy: 2, delicious: 3, healthy: 4 },
+      shops: [], // subset of DANISH_CHAINS
+      shopsOther: "",
+      inspiration: ""
+    },
+    B: {
+      days: 7,
+      suggestionsPerDay: 3,
+      stablesVsNew: 50, // 0 = mostly stables, 100 = mostly new
+      priorityOrder: ["cheap", "quickEasy", "delicious", "healthy"],
+      shops: [], // freeform chips, any text
+      inspiration: ""
+    },
+    C: {
+      days: 7,
+      suggestionsPerDay: 3,
+      favorStables: true, // simple toggle
+      weights: { cheap: 70, quickEasy: 60, delicious: 40, healthy: 40 },
+      shops: [], // subset of DANISH_CHAINS
+      shopsOther: "",
+      shopsOtherEnabled: false,
+      inspiration: ""
+    },
+    D: {
+      // Recommended direction after live feedback on B and C: B's boxed
+      // layout (days+suggestions+stables in one card, priority order in
+      // its own drag-to-reorder card) combined with C's fixed-chain pill
+      // picker for shops (no free typing needed for known chains — that's
+      // what B's freeform chips got pushback on), now with logo badges.
+      days: 7,
+      suggestionsPerDay: 3,
+      stablesVsNew: 50,
+      priorityOrder: ["cheap", "quickEasy", "delicious", "healthy"],
+      shops: [], // subset of DANISH_CHAINS
+      shopsOther: "",
+      shopsOtherEnabled: false,
+      inspiration: ""
+    }
+  };
+
+  var root = document.getElementById("variant-root");
+  var stateJson = document.getElementById("state-json");
+  var current = (new URLSearchParams(location.search).get("variant") || "A").toUpperCase();
+  if (!state[current]) current = "A";
+
+  function render() {
+    var idx = VARIANTS.findIndex(function (v) { return v.key === current; });
+    document.getElementById("switcher-label").innerHTML =
+      current + " &mdash; " + VARIANTS[idx].name + "<b>variant " + (idx + 1) + " of " + VARIANTS.length + "</b>";
+
+    if (current === "A") renderVariantA();
+    if (current === "B") renderVariantB();
+    if (current === "C") renderVariantC();
+    if (current === "D") renderVariantD();
+
+    stateJson.textContent = JSON.stringify(state[current], null, 2);
+  }
+
+  function setVariant(key) {
+    current = key;
+    var params = new URLSearchParams(location.search);
+    params.set("variant", key);
+    history.replaceState(null, "", location.pathname + "?" + params.toString());
+    render();
+  }
+
+  function cycle(dir) {
+    var idx = VARIANTS.findIndex(function (v) { return v.key === current; });
+    idx = (idx + dir + VARIANTS.length) % VARIANTS.length;
+    setVariant(VARIANTS[idx].key);
+  }
+
+  document.getElementById("prev").addEventListener("click", function () { cycle(-1); });
+  document.getElementById("next").addEventListener("click", function () { cycle(1); });
+  document.addEventListener("keydown", function (e) {
+    var tag = document.activeElement.tagName;
+    var editable = document.activeElement.isContentEditable;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || editable) return;
+    if (e.key === "ArrowLeft") cycle(-1);
+    if (e.key === "ArrowRight") cycle(1);
+  });
+
+  // ------------------------------------------------------------------
+  // Variant A — plain single-column form. Simplest to implement: native
+  // number inputs, a segmented control, <select> for rank order, a
+  // checkbox list of known Danish chains + "Other" free text.
+  // ------------------------------------------------------------------
+  function renderVariantA() {
+    var s = state.A;
+    root.className = "variant-a";
+    root.innerHTML =
+      '<section>' +
+        '<div class="row">' +
+          stepperField("a-days", "Days to plan", s.days, 1, 14) +
+          stepperField("a-spd", "Suggestions / day", s.suggestionsPerDay, 1, 10) +
+        '</div>' +
+        '<div class="field"><label>Stables vs. new dishes</label>' +
+          '<div class="segmented" id="a-stables">' +
+            ['mostlyStables', 'balanced', 'mostlyNew'].map(function (v) {
+              var text = v === "mostlyStables" ? "Mostly stables" : v === "balanced" ? "Balanced" : "Mostly new";
+              return '<button data-v="' + v + '" class="' + (s.stablesVsNew === v ? "active" : "") + '">' + text + '</button>';
+            }).join("") +
+          '</div>' +
+        '</div>' +
+      '</section>' +
+
+      '<section>' +
+        '<label>Priority order <span class="hint">(assign a rank 1–4 to each — no ties)</span></label>' +
+        Object.keys(PRIORITIES).map(function (k) {
+          return '<div class="rank-row"><span>' + PRIORITIES[k] + '</span>' +
+            '<select class="rank" data-k="' + k + '">' +
+              [1,2,3,4].map(function (n) { return '<option value="' + n + '"' + (s.ranks[k] === n ? " selected" : "") + '>' + n + '</option>'; }).join("") +
+            '</select></div>';
+        }).join("") +
+      '</section>' +
+
+      '<section>' +
+        '<label>Preferred shops</label>' +
+        '<div class="checklist">' +
+          DANISH_CHAINS.map(function (c) {
+            return '<label><input type="checkbox" data-shop="' + c + '" ' + (s.shops.indexOf(c) > -1 ? "checked" : "") + '> ' + c + '</label>';
+          }).join("") +
+        '</div>' +
+        '<div class="field" style="margin-top:12px;"><label for="a-other">Other (comma-separated)</label>' +
+          '<input type="text" id="a-other" value="' + s.shopsOther + '" placeholder="e.g. the corner bakery"></div>' +
+      '</section>' +
+
+      '<section>' +
+        '<label for="a-insp">Inspiration <span class="hint">— what new dishes are you curious to try?</span></label>' +
+        '<textarea id="a-insp" placeholder="e.g. more Thai food, one-pot meals...">' + s.inspiration + '</textarea>' +
+      '</section>';
+
+    bindSteppers(root);
+    root.querySelector("#a-days").addEventListener("input", function (e) { s.days = Number(e.target.value); sync(); });
+    root.querySelector("#a-spd").addEventListener("input", function (e) { s.suggestionsPerDay = Number(e.target.value); sync(); });
+    root.querySelectorAll("#a-stables button").forEach(function (b) {
+      b.addEventListener("click", function () { s.stablesVsNew = b.dataset.v; renderVariantA(); sync(); });
+    });
+    root.querySelectorAll("select.rank").forEach(function (sel) {
+      sel.addEventListener("change", function () { s.ranks[sel.dataset.k] = Number(sel.value); sync(); });
+    });
+    root.querySelectorAll('input[data-shop]').forEach(function (cb) {
+      cb.addEventListener("change", function () {
+        var c = cb.dataset.shop;
+        var i = s.shops.indexOf(c);
+        if (cb.checked && i === -1) s.shops.push(c);
+        if (!cb.checked && i > -1) s.shops.splice(i, 1);
+        sync();
+      });
+    });
+    root.querySelector("#a-other").addEventListener("input", function (e) { s.shopsOther = e.target.value; sync(); });
+    root.querySelector("#a-insp").addEventListener("input", function (e) { s.inspiration = e.target.value; sync(); });
+  }
+
+  // ------------------------------------------------------------------
+  // Variant B — two-column card layout. Priority order as a native
+  // drag-to-reorder list. Stables-vs-new as a single slider. Preferred
+  // shops as freeform chip/tag input (type anything, hit Enter).
+  // ------------------------------------------------------------------
+  function renderVariantB() {
+    var s = state.B;
+    root.className = "variant-b";
+    root.innerHTML =
+      '<div class="card">' +
+        '<div class="row">' +
+          stepperField("b-days", "Days to plan", s.days, 1, 14) +
+          stepperField("b-spd", "Suggestions / day", s.suggestionsPerDay, 1, 10) +
+        '</div>' +
+        '<label>Stables vs. new</label>' +
+        '<div class="slider-track">' +
+          '<input type="range" id="b-stables" min="0" max="100" value="' + s.stablesVsNew + '">' +
+          '<div class="slider-labels"><span>Mostly stables</span><span>Mostly new</span></div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="card">' +
+        '<label>Priority order <span class="hint">(drag to reorder, top = highest priority)</span></label>' +
+        '<ul class="drag-list" id="b-list">' +
+          s.priorityOrder.map(function (k, i) {
+            return '<li draggable="true" data-k="' + k + '">' +
+              '<span class="rank-num">' + (i + 1) + '</span><span class="grip">::</span> ' + PRIORITIES[k] +
+            '</li>';
+          }).join("") +
+        '</ul>' +
+      '</div>' +
+
+      '<div class="card full">' +
+        '<label for="b-shop-input">Preferred shops <span class="hint">(freeform — type a name, press Enter)</span></label>' +
+        '<div class="chips" id="b-chips">' +
+          s.shops.map(function (c, i) {
+            return '<span class="chip">' + c + '<button data-i="' + i + '">&times;</button></span>';
+          }).join("") +
+        '</div>' +
+        '<div class="chip-input">' +
+          '<input type="text" id="b-shop-input" placeholder="e.g. Netto, Irma, the corner bakery...">' +
+          '<button id="b-shop-add">Add</button>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="card full">' +
+        '<label for="b-insp">Inspiration</label>' +
+        '<textarea id="b-insp" placeholder="e.g. more Thai food, one-pot meals...">' + s.inspiration + '</textarea>' +
+      '</div>';
+
+    bindSteppers(root);
+    root.querySelector("#b-days").addEventListener("input", function (e) { s.days = Number(e.target.value); sync(); });
+    root.querySelector("#b-spd").addEventListener("input", function (e) { s.suggestionsPerDay = Number(e.target.value); sync(); });
+    root.querySelector("#b-stables").addEventListener("input", function (e) { s.stablesVsNew = Number(e.target.value); sync(); });
+    root.querySelector("#b-insp").addEventListener("input", function (e) { s.inspiration = e.target.value; sync(); });
+
+    var dragEl = null;
+    var list = root.querySelector("#b-list");
+    list.querySelectorAll("li").forEach(function (li) {
+      li.addEventListener("dragstart", function () { dragEl = li; li.classList.add("dragging"); });
+      li.addEventListener("dragend", function () { li.classList.remove("dragging"); });
+      li.addEventListener("dragover", function (e) {
+        e.preventDefault();
+        var after = getDragAfterElement(list, e.clientY);
+        if (after == null) list.appendChild(dragEl); else list.insertBefore(dragEl, after);
+      });
+    });
+    list.addEventListener("drop", function () {
+      s.priorityOrder = Array.prototype.map.call(list.querySelectorAll("li"), function (li) { return li.dataset.k; });
+      renderVariantB();
+      sync();
+    });
+
+    function getDragAfterElement(container, y) {
+      var els = Array.prototype.filter.call(container.querySelectorAll("li:not(.dragging)"), function () { return true; });
+      var closest = { offset: -Infinity, element: null };
+      els.forEach(function (child) {
+        var box = child.getBoundingClientRect();
+        var offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) closest = { offset: offset, element: child };
+      });
+      return closest.element;
+    }
+
+    function addShop() {
+      var input = root.querySelector("#b-shop-input");
+      var v = input.value.trim();
+      if (!v) return;
+      s.shops.push(v);
+      input.value = "";
+      renderVariantB();
+      sync();
+    }
+    root.querySelector("#b-shop-add").addEventListener("click", addShop);
+    root.querySelector("#b-shop-input").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); addShop(); } });
+    root.querySelectorAll("#b-chips button").forEach(function (btn) {
+      btn.addEventListener("click", function () { s.shops.splice(Number(btn.dataset.i), 1); renderVariantB(); sync(); });
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Variant C — card grid. Priority order as four independent weighted
+  // sliders (not a strict rank). Stables-vs-new as a binary toggle.
+  // Preferred shops as a pill picker over the fixed Danish-chain list,
+  // with an "Other" pill that reveals a free-text field.
+  // ------------------------------------------------------------------
+  function renderVariantC() {
+    var s = state.C;
+    root.className = "variant-c";
+    root.innerHTML =
+      '<div class="card">' +
+        '<h3>Plan window</h3>' +
+        '<div class="row">' +
+          stepperField("c-days", "Days to plan", s.days, 1, 14) +
+          stepperField("c-spd", "Suggestions / day", s.suggestionsPerDay, 1, 10) +
+        '</div>' +
+      '</div>' +
+
+      '<div class="card">' +
+        '<h3>Stables vs. new</h3>' +
+        '<div class="toggle">' +
+          '<span>' + (s.favorStables ? "Favor stables" : "Favor new dishes") + '</span>' +
+          '<label class="switch"><input type="checkbox" id="c-stables" ' + (s.favorStables ? "checked" : "") + '><span class="track"></span><span class="knob"></span></label>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="card wide">' +
+        '<h3>Priority weights</h3>' +
+        Object.keys(PRIORITIES).map(function (k) {
+          return '<div class="weight-row">' +
+            '<div class="top"><span>' + PRIORITIES[k] + '</span><span class="val">' + s.weights[k] + '%</span></div>' +
+            '<input type="range" min="0" max="100" data-k="' + k + '" value="' + s.weights[k] + '">' +
+            '<div class="weight-bar"><div style="width:' + s.weights[k] + '%"></div></div>' +
+          '</div>';
+        }).join("") +
+      '</div>' +
+
+      '<div class="card wide">' +
+        '<h3>Preferred shops</h3>' +
+        '<div class="pill-grid" id="c-pills">' +
+          DANISH_CHAINS.map(function (c) {
+            return '<span class="pill' + (s.shops.indexOf(c) > -1 ? " selected" : "") + '" data-shop="' + c + '">' + shopIconHtml(c) + c + '</span>';
+          }).join("") +
+          '<span class="pill' + (s.shopsOtherEnabled ? " selected" : "") + '" id="c-other-pill">Other&hellip;</span>' +
+        '</div>' +
+        (s.shopsOtherEnabled ?
+          '<div class="other-input"><input type="text" id="c-other" placeholder="e.g. the corner bakery" value="' + s.shopsOther + '"></div>' : '') +
+      '</div>' +
+
+      '<div class="card wide">' +
+        '<h3>Inspiration</h3>' +
+        '<textarea id="c-insp" placeholder="e.g. more Thai food, one-pot meals...">' + s.inspiration + '</textarea>' +
+      '</div>';
+
+    bindShopIcons(root);
+    bindSteppers(root);
+    root.querySelector("#c-days").addEventListener("input", function (e) { s.days = Number(e.target.value); sync(); });
+    root.querySelector("#c-spd").addEventListener("input", function (e) { s.suggestionsPerDay = Number(e.target.value); sync(); });
+    root.querySelector("#c-stables").addEventListener("change", function (e) { s.favorStables = e.target.checked; renderVariantC(); sync(); });
+    root.querySelectorAll('input[type=range][data-k]').forEach(function (r) {
+      r.addEventListener("input", function () { s.weights[r.dataset.k] = Number(r.value); renderVariantC(); sync(); });
+    });
+    root.querySelectorAll('#c-pills .pill[data-shop]').forEach(function (p) {
+      p.addEventListener("click", function () {
+        var c = p.dataset.shop;
+        var i = s.shops.indexOf(c);
+        if (i > -1) s.shops.splice(i, 1); else s.shops.push(c);
+        renderVariantC();
+        sync();
+      });
+    });
+    root.querySelector("#c-other-pill").addEventListener("click", function () { s.shopsOtherEnabled = !s.shopsOtherEnabled; renderVariantC(); sync(); });
+    var otherInput = root.querySelector("#c-other");
+    if (otherInput) otherInput.addEventListener("input", function (e) { s.shopsOther = e.target.value; sync(); });
+    root.querySelector("#c-insp").addEventListener("input", function (e) { s.inspiration = e.target.value; sync(); });
+  }
+
+  // ------------------------------------------------------------------
+  // Variant D — recommended direction from live feedback: B's boxed
+  // layout (reuses .variant-b card/grid/drag-list/slider styles) plus
+  // C's fixed-chain pill picker for shops, now with logo badges (reuses
+  // .variant-c pill styles). No new layout CSS needed — just borrows both.
+  // ------------------------------------------------------------------
+  function renderVariantD() {
+    var s = state.D;
+    root.className = "variant-b variant-c";
+    root.innerHTML =
+      '<div class="card">' +
+        '<div class="row">' +
+          stepperField("d-days", "Days to plan", s.days, 1, 14) +
+          stepperField("d-spd", "Suggestions / day", s.suggestionsPerDay, 1, 10) +
+        '</div>' +
+        '<label>Stables vs. new</label>' +
+        '<div class="slider-track">' +
+          '<input type="range" id="d-stables" min="0" max="100" value="' + s.stablesVsNew + '">' +
+          '<div class="slider-labels"><span>Mostly stables</span><span>Mostly new</span></div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="card">' +
+        '<label>Priority order <span class="hint">(drag to reorder, top = highest priority)</span></label>' +
+        '<ul class="drag-list" id="d-list">' +
+          s.priorityOrder.map(function (k, i) {
+            return '<li draggable="true" data-k="' + k + '">' +
+              '<span class="rank-num">' + (i + 1) + '</span><span class="grip">::</span> ' + PRIORITIES[k] +
+            '</li>';
+          }).join("") +
+        '</ul>' +
+      '</div>' +
+
+      '<div class="card full">' +
+        '<label>Preferred shops</label>' +
+        '<div class="pill-grid" id="d-pills">' +
+          DANISH_CHAINS.map(function (c) {
+            return '<span class="pill' + (s.shops.indexOf(c) > -1 ? " selected" : "") + '" data-shop="' + c + '">' + shopIconHtml(c) + c + '</span>';
+          }).join("") +
+          '<span class="pill' + (s.shopsOtherEnabled ? " selected" : "") + '" id="d-other-pill">Other&hellip;</span>' +
+        '</div>' +
+        (s.shopsOtherEnabled ?
+          '<div class="other-input"><input type="text" id="d-other" placeholder="e.g. the corner bakery" value="' + s.shopsOther + '"></div>' : '') +
+      '</div>' +
+
+      '<div class="card full">' +
+        '<label for="d-insp">Inspiration</label>' +
+        '<textarea id="d-insp" placeholder="e.g. more Thai food, one-pot meals...">' + s.inspiration + '</textarea>' +
+      '</div>';
+
+    bindShopIcons(root);
+    bindSteppers(root);
+    root.querySelector("#d-days").addEventListener("input", function (e) { s.days = Number(e.target.value); sync(); });
+    root.querySelector("#d-spd").addEventListener("input", function (e) { s.suggestionsPerDay = Number(e.target.value); sync(); });
+    root.querySelector("#d-stables").addEventListener("input", function (e) { s.stablesVsNew = Number(e.target.value); sync(); });
+    root.querySelector("#d-insp").addEventListener("input", function (e) { s.inspiration = e.target.value; sync(); });
+
+    var dragEl = null;
+    var list = root.querySelector("#d-list");
+    list.querySelectorAll("li").forEach(function (li) {
+      li.addEventListener("dragstart", function () { dragEl = li; li.classList.add("dragging"); });
+      li.addEventListener("dragend", function () { li.classList.remove("dragging"); });
+      li.addEventListener("dragover", function (e) {
+        e.preventDefault();
+        var after = getDragAfterElementD(list, e.clientY);
+        if (after == null) list.appendChild(dragEl); else list.insertBefore(dragEl, after);
+      });
+    });
+    list.addEventListener("drop", function () {
+      s.priorityOrder = Array.prototype.map.call(list.querySelectorAll("li"), function (li) { return li.dataset.k; });
+      renderVariantD();
+      sync();
+    });
+
+    function getDragAfterElementD(container, y) {
+      var els = Array.prototype.filter.call(container.querySelectorAll("li:not(.dragging)"), function () { return true; });
+      var closest = { offset: -Infinity, element: null };
+      els.forEach(function (child) {
+        var box = child.getBoundingClientRect();
+        var offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) closest = { offset: offset, element: child };
+      });
+      return closest.element;
+    }
+
+    root.querySelectorAll('#d-pills .pill[data-shop]').forEach(function (p) {
+      p.addEventListener("click", function () {
+        var c = p.dataset.shop;
+        var i = s.shops.indexOf(c);
+        if (i > -1) s.shops.splice(i, 1); else s.shops.push(c);
+        renderVariantD();
+        sync();
+      });
+    });
+    root.querySelector("#d-other-pill").addEventListener("click", function () { s.shopsOtherEnabled = !s.shopsOtherEnabled; renderVariantD(); sync(); });
+    var otherInputD = root.querySelector("#d-other");
+    if (otherInputD) otherInputD.addEventListener("input", function (e) { s.shopsOther = e.target.value; sync(); });
+  }
+
+  function sync() { stateJson.textContent = JSON.stringify(state[current], null, 2); }
+
+  render();
+})();
+</script>
+</body>
+</html>
