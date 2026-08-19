@@ -470,11 +470,13 @@
         list.forEach(function (d) {
           var excerpt = d.recipe || d.ingredients || d.variants || "";
           var tagLabels = d.tags.favourite ? tagChip(true, "fav", "⭐", "Favourite") : "";
+          // No tags → skip the row entirely and let the excerpt use that space instead.
+          var excerptLimit = tagLabels ? 70 : 130;
           html += '<div class="b-card" data-id="' + d.id + '">';
           html += '<button class="b-card-delete" data-action="delete" title="Delete">🗑</button>';
           html += '<h3>' + esc(d.title) + '</h3>';
-          html += '<div class="b-tags-row">' + tagLabels + '</div>';
-          html += '<div class="b-excerpt">' + (excerpt ? esc(excerpt.slice(0, 70)) + (excerpt.length > 70 ? "…" : "") : '<em style="opacity:.6">No extra detail added yet</em>') + '</div>';
+          if (tagLabels) html += '<div class="b-tags-row">' + tagLabels + '</div>';
+          html += '<div class="b-excerpt">' + (excerpt ? esc(excerpt.slice(0, excerptLimit)) + (excerpt.length > excerptLimit ? "…" : "") : '<em style="opacity:.6">No extra detail added yet</em>') + '</div>';
           html += '</div>';
         });
         html += '<button class="b-add-card" id="b-add-card">+ Add Dish</button>';
