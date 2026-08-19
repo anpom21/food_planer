@@ -8,15 +8,19 @@
   (https://github.com/anpom21/food_planer/issues/5, child of map issue #1).
 
   Plan: three structurally different variants of the Dish Library screen —
-  progressive disclosure of optional Dish fields, Favourite/Stable tagging,
+  progressive disclosure of optional Dish fields, Favourite tagging,
   edit/delete — switchable via ?variant=A|B|C. No existing frontend/route
   exists yet in this repo, so this is a standalone file: double-click to
   open in a browser, no build step, no server.
 
+  Resolved: Variant B won (card grid + modal) — see issue #5 for the full
+  decision. Variants A and C stay on this branch as historical reference
+  from the comparison; only B is kept current with later refinements
+  (Stable tag removed everywhere — see CONTEXT.md's Known dish / Unknown
+  dish terms).
+
   State is in-memory only. Nothing here is production code — no tests, no
-  real persistence, minimal error handling. Once a variant wins, fold the
-  decision into the real spec/build and leave this file on the throwaway
-  branch, not main.
+  real persistence, minimal error handling.
 -->
 <style>
   :root {
@@ -28,7 +32,7 @@
     --accent: #c1592b;
     --accent-soft: #f3ddd0;
     --favourite: #d98c1f;
-    --stable: #2f7a63;
+    --done: #2f7a63;
     --radius: 10px;
     --shadow: 0 1px 2px rgba(44,38,34,0.06), 0 4px 14px rgba(44,38,34,0.06);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
@@ -88,7 +92,6 @@
     border: 1px solid var(--line); background: var(--panel); color: var(--ink-soft);
   }
   .tag-chip.on.fav { background: #fdf1de; border-color: #f0d29a; color: var(--favourite); font-weight: 600; }
-  .tag-chip.on.stable { background: #e6f2ee; border-color: #b7dccf; color: var(--stable); font-weight: 600; }
   .tag-chip:hover { filter: brightness(0.97); }
   textarea {
     width: 100%; border: 1px solid var(--line); border-radius: 8px;
@@ -221,7 +224,7 @@
   .c-title-btn:hover { color: var(--accent); text-decoration: underline; }
   .c-badges { display: flex; gap: 5px; flex-wrap: wrap; }
   .c-badge { font-size: 10.5px; padding: 2px 6px; border-radius: 5px; border: 1px solid var(--line); color: var(--ink-soft); }
-  .c-badge.filled { border-color: #cfe3da; background: #eef6f2; color: var(--stable); font-weight: 600; }
+  .c-badge.filled { border-color: #cfe3da; background: #eef6f2; color: var(--done); font-weight: 600; }
   .c-tags-cell { display: flex; gap: 4px; }
   .c-actions-cell { display: flex; gap: 2px; justify-content: flex-end; }
 
@@ -237,7 +240,7 @@
   .c-dot-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; cursor: pointer; }
   .c-dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line); display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--ink-soft); background: var(--panel); }
   .c-dot.active { border-color: var(--accent); color: var(--accent); font-weight: 700; }
-  .c-dot.done { border-color: var(--stable); background: var(--stable); color: #fff; }
+  .c-dot.done { border-color: var(--done); background: var(--done); color: #fff; }
   .c-dot-wrap span.lbl { font-size: 10px; color: var(--ink-soft); text-align: center; }
   .c-dot-wrap.locked { cursor: not-allowed; opacity: .5; }
   .c-panel-body { padding: 20px 22px; flex: 1; overflow-y: auto; }
@@ -273,20 +276,20 @@
 
   function seedDishes() {
     return [
-      { id: uid(), title: "Spaghetti Bolognese", tags: { favourite: false, stable: true },
+      { id: uid(), title: "Spaghetti Bolognese", tags: { favourite: false },
         ingredients: "Beef mince, tinned tomatoes, onion, garlic, carrot, spaghetti, parmesan",
         recipe: "Soften onion/garlic/carrot. Brown mince. Add tomatoes, simmer 40 min. Serve over pasta.",
         variants: "" },
-      { id: uid(), title: "Sunday Roast Chicken", tags: { favourite: true, stable: false },
+      { id: uid(), title: "Sunday Roast Chicken", tags: { favourite: true },
         ingredients: "Whole chicken, potatoes, carrots, butter, thyme",
         recipe: "Roast at 200°C for ~1h20, basting halfway. Rest 15 min before carving.",
         variants: "Swap potatoes for parsnips. Add lemon + garlic under the skin." },
-      { id: uid(), title: "Pancakes", tags: { favourite: true, stable: true },
+      { id: uid(), title: "Pancakes", tags: { favourite: true },
         ingredients: "Flour, eggs, milk, butter, sugar, pinch of salt",
         recipe: "", variants: "" },
-      { id: uid(), title: "Veggie Stir-fry", tags: { favourite: false, stable: false },
+      { id: uid(), title: "Veggie Stir-fry", tags: { favourite: false },
         ingredients: "", recipe: "", variants: "" },
-      { id: uid(), title: "Homemade Pizza", tags: { favourite: true, stable: false },
+      { id: uid(), title: "Homemade Pizza", tags: { favourite: true },
         ingredients: "",
         recipe: "Stretch dough, top with tomato + mozzarella, bake at max oven temp ~8 min.",
         variants: "Swap mozzarella for taleggio + honey. Add nduja for a spicy version." }
@@ -299,7 +302,7 @@
   var Store = {
     all: function () { return showEmpty ? [] : dishes; },
     add: function (partial) {
-      var d = { id: uid(), title: "", tags: { favourite: false, stable: false },
+      var d = { id: uid(), title: "", tags: { favourite: false },
         ingredients: "", recipe: "", variants: "" };
       Object.assign(d, partial);
       dishes.push(d);
@@ -359,7 +362,6 @@
           html += '<span class="title">' + esc(d.title) + '</span>';
           html += '<span class="a-tags">' +
             '<span data-action="tag-fav" data-stop="1">' + tagChip(d.tags.favourite, "fav", "⭐", "") + '</span>' +
-            '<span data-action="tag-stable" data-stop="1">' + tagChip(d.tags.stable, "stable", "🔁", "") + '</span>' +
             '</span>';
           html += '<span class="meta">' + completeness(d) + '/3 details</span>';
           html += '<span class="a-row-actions">' +
@@ -417,7 +419,6 @@
           if (stopEl) {
             var action = stopEl.getAttribute("data-action");
             if (action === "tag-fav") Store.toggleTag(id, "favourite");
-            if (action === "tag-stable") Store.toggleTag(id, "stable");
             if (action === "delete") { if (confirm("Delete this dish?")) Store.remove(id); }
             rerender();
             return;
@@ -469,8 +470,7 @@
         html += '<div class="b-grid">';
         list.forEach(function (d) {
           var excerpt = d.recipe || d.ingredients || d.variants || "";
-          var tagLabels = (d.tags.favourite ? tagChip(true, "fav", "⭐", "Favourite") : "") +
-            (d.tags.stable ? tagChip(true, "stable", "🔁", "Stable") : "");
+          var tagLabels = d.tags.favourite ? tagChip(true, "fav", "⭐", "Favourite") : "";
           html += '<div class="b-card" data-id="' + d.id + '">';
           html += '<button class="b-card-delete" data-action="delete" title="Delete">🗑</button>';
           html += '<h3>' + esc(d.title) + '</h3>';
@@ -495,8 +495,7 @@
       m += '<input type="text" class="b-title-input" id="b-title" placeholder="Dish title" value="' + esc(d.title) + '" />';
       m += '<div class="required-note">Title is the only required field.</div>';
       m += '<div class="b-tag-row">' +
-        '<button class="tag-chip ' + (d.tags.favourite ? "on fav" : "") + '" data-action="tag-fav">⭐ Favourite</button>' +
-        '<button class="tag-chip ' + (d.tags.stable ? "on stable" : "") + '" data-action="tag-stable">🔁 Stable</button></div>';
+        '<button class="tag-chip ' + (d.tags.favourite ? "on fav" : "") + '" data-action="tag-fav">⭐ Favourite</button></div>';
 
       m += '<div class="b-more-toggle" id="b-more-toggle">' +
         '<span class="chev">' + (state.modal.moreOpen ? "−" : "+") + '</span>' +
@@ -506,8 +505,8 @@
         m += '<div class="b-more-block">';
         m += '<div class="b-more-caption">Totally optional — leave any of these blank and add them later.</div>';
         m += field("ingredients", "Ingredients", d.ingredients);
-        m += field("recipe", "Recipe / instructions", d.recipe);
         m += field("variants", "Variants & substitutes", d.variants);
+        m += field("recipe", "Recipe / instructions", d.recipe);
         m += '</div>';
       }
       m += '</div>';
@@ -524,7 +523,7 @@
 
     function openAdd() {
       state.modal = { mode: "add", moreOpen: false,
-        draft: { title: "", tags: { favourite: false, stable: false }, ingredients: "", recipe: "", variants: "" } };
+        draft: { title: "", tags: { favourite: false }, ingredients: "", recipe: "", variants: "" } };
       rerender();
       var t = root.querySelector("#b-title"); if (t) t.focus();
     }
@@ -532,7 +531,7 @@
       var d = Store.get(id);
       var hasDetail = !!(d.ingredients || d.recipe || d.variants);
       state.modal = { mode: "edit", id: id, moreOpen: hasDetail,
-        draft: { title: d.title, tags: { favourite: d.tags.favourite, stable: d.tags.stable },
+        draft: { title: d.title, tags: { favourite: d.tags.favourite },
           ingredients: d.ingredients, recipe: d.recipe, variants: d.variants } };
       rerender();
     }
@@ -565,9 +564,6 @@
       });
       root.querySelector('[data-action="tag-fav"]').addEventListener("click", function () {
         state.modal.draft.tags.favourite = !state.modal.draft.tags.favourite; rerender();
-      });
-      root.querySelector('[data-action="tag-stable"]').addEventListener("click", function () {
-        state.modal.draft.tags.stable = !state.modal.draft.tags.stable; rerender();
       });
       root.querySelector("#b-more-toggle").addEventListener("click", function () {
         state.modal.moreOpen = !state.modal.moreOpen; rerender();
@@ -612,8 +608,7 @@
           html += '<tr data-id="' + d.id + '">';
           html += '<td><button class="c-title-btn" data-action="edit">' + esc(d.title) + '</button></td>';
           html += '<td class="c-tags-cell">' +
-            '<span data-action="tag-fav">' + tagChip(d.tags.favourite, "fav", "⭐", "") + '</span>' +
-            '<span data-action="tag-stable">' + tagChip(d.tags.stable, "stable", "🔁", "") + '</span></td>';
+            '<span data-action="tag-fav">' + tagChip(d.tags.favourite, "fav", "⭐", "") + '</span></td>';
           html += '<td><div class="c-badges">' +
             badge("Ingredients", !!d.ingredients) + badge("Recipe", !!d.recipe) + badge("Variants", !!d.variants) + '</div></td>';
           html += '<td class="c-actions-cell"><button class="btn ghost" data-action="delete" title="Delete">🗑</button></td>';
@@ -653,8 +648,7 @@
         html += '<div class="c-step-sub">Required. Everything after this is optional — add it now or come back later.</div>';
         html += '<input type="text" id="c-title" placeholder="Dish title" value="' + esc(p.draft.title) + '" style="width:100%" />';
         html += '<div style="margin-top:16px;display:flex;gap:8px;">' +
-          '<span data-action="tag-fav">' + tagChip(p.draft.tags.favourite, "fav", "⭐", "Favourite") + '</span>' +
-          '<span data-action="tag-stable">' + tagChip(p.draft.tags.stable, "stable", "🔁", "Stable") + '</span></div>';
+          '<span data-action="tag-fav">' + tagChip(p.draft.tags.favourite, "fav", "⭐", "Favourite") + '</span></div>';
       } else {
         var labelMap = { ingredients: "Ingredients", recipe: "Recipe / instructions", variants: "Variants & substitutes" };
         html += '<div class="c-step-title">' + labelMap[step.key] + '</div>';
@@ -685,14 +679,14 @@
 
     function openNew() {
       state.panel = { id: null, step: 0, createdOnce: false,
-        draft: { title: "", tags: { favourite: false, stable: false }, ingredients: "", recipe: "", variants: "" } };
+        draft: { title: "", tags: { favourite: false }, ingredients: "", recipe: "", variants: "" } };
       rerender();
       var t = root.querySelector("#c-title"); if (t) t.focus();
     }
     function openEdit(id) {
       var d = Store.get(id);
       state.panel = { id: id, step: 0, createdOnce: true,
-        draft: { title: d.title, tags: { favourite: d.tags.favourite, stable: d.tags.stable },
+        draft: { title: d.title, tags: { favourite: d.tags.favourite },
           ingredients: d.ingredients, recipe: d.recipe, variants: d.variants } };
       rerender();
     }
@@ -709,7 +703,6 @@
         var id = tr.getAttribute("data-id");
         tr.querySelector('[data-action="edit"]').addEventListener("click", function () { openEdit(id); });
         tr.querySelector('[data-action="tag-fav"]').addEventListener("click", function () { Store.toggleTag(id, "favourite"); rerender(); });
-        tr.querySelector('[data-action="tag-stable"]').addEventListener("click", function () { Store.toggleTag(id, "stable"); rerender(); });
         tr.querySelector('[data-action="delete"]').addEventListener("click", function () {
           if (confirm("Delete this dish?")) { Store.remove(id); rerender(); }
         });
@@ -739,8 +732,6 @@
 
       var favEl = root.querySelector('[data-action="tag-fav"]');
       if (favEl) favEl.addEventListener("click", function () { p.draft.tags.favourite = !p.draft.tags.favourite; rerender(); });
-      var stableEl = root.querySelector('[data-action="tag-stable"]');
-      if (stableEl) stableEl.addEventListener("click", function () { p.draft.tags.stable = !p.draft.tags.stable; rerender(); });
 
       var back = root.querySelector("#c-back");
       if (back) back.addEventListener("click", function () { p.step = Math.max(0, p.step - 1); rerender(); });
