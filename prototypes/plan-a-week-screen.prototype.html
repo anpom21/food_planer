@@ -23,6 +23,14 @@
     - Do past PlanningRuns stay browsable, or are they ephemeral?
       A = ephemeral, B = shallow (recent runs list), C = full archive.
 
+  C is the chosen direction (default variant). In C, cards are selected by
+  clicking them (filled check circle, top-right; the Details button doesn't
+  select), and a bottom action bar opens an ingredient review: every selected
+  dish's ingredients grouped by dish, all ticked by default, untick to skip,
+  and any ingredient appearing in more than one selected dish is tinted so the
+  overlap is obvious. A and B keep the older per-card "+ Add ingredients"
+  button and are left as-is for reference.
+
   Not wired to anything real. No persistence, no backend, no LLM — runs are
   faked locally. Live state is printed in the "State" panel (bottom-left).
 -->
@@ -47,7 +55,7 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: var(--bg);
     color: var(--ink);
-    padding-bottom: 110px;
+    padding-bottom: 150px;
     font-size: 14px;
   }
   header.app {
@@ -114,6 +122,51 @@
   .added { font-size: 12px; color: var(--accent); font-weight: 600; }
   .daylabel { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
   .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 28px 10px; }
+
+  /* --- selectable cards + ingredient review (variant C) --- */
+  .sugg.selectable { cursor: pointer; position: relative; transition: border-color .12s, box-shadow .12s; }
+  .sugg.selectable:hover { border-color: #b9b9be; }
+  .sugg.selectable.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .selmark {
+    position: absolute; top: -8px; right: -8px; width: 24px; height: 24px; border-radius: 50%;
+    background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; box-shadow: 0 1px 4px rgba(0,0,0,.25);
+  }
+  .inlist { font-size: 11px; color: var(--accent); font-weight: 600; }
+  .c-actionbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 850; background: var(--card);
+    border-top: 1px solid var(--line); box-shadow: 0 -3px 14px rgba(0,0,0,.08);
+    padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .c-actionbar .left { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .c-actionbar .right { display: flex; align-items: center; gap: 10px; }
+  .modal.wide { max-width: 680px; max-height: 74vh; display: flex; flex-direction: column; }
+  .modal.wide .scroll { overflow: auto; margin: 0 -4px; padding: 0 4px; }
+  .ing-group { margin-bottom: 14px; }
+  .ing-group .ghd {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    font-weight: 700; font-size: 13px; margin-bottom: 6px; padding-bottom: 5px; border-bottom: 1px solid var(--line);
+  }
+  .ing-row {
+    display: flex; align-items: center; gap: 9px; padding: 6px 9px; border-radius: 7px;
+    border: 1px solid transparent; font-size: 13px; cursor: pointer; margin-bottom: 3px;
+  }
+  .ing-row:hover { background: var(--bg); }
+  .ing-row .q { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 62px; }
+  .ing-row .dup { margin-left: auto; font-size: 11px; font-weight: 600; opacity: .8; }
+  .ing-row.off { opacity: .45; }
+  .ing-row.off .nm { text-decoration: line-through; }
+  .tint-0 { background: #fdeee6; border-color: #f3d6c6; }
+  .tint-1 { background: #e7f1fb; border-color: #cfe0f2; }
+  .tint-2 { background: #eaf6ea; border-color: #cce6cc; }
+  .tint-3 { background: #f6ecfa; border-color: #e3d0ee; }
+  .tint-4 { background: #fdf6dc; border-color: #eee0b0; }
+  .tint-5 { background: #e6f5f6; border-color: #c8e5e8; }
+  .toast {
+    position: fixed; bottom: 86px; left: 50%; transform: translateX(-50%); z-index: 990;
+    background: var(--accent); color: #fff; padding: 9px 16px; border-radius: 999px;
+    font-size: 13px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+  }
 
   /* --- floating prototype switcher --- */
   #switcher {
@@ -219,11 +272,11 @@ const DISHES = [
 const POOL = [
   { title: "Frikadeller med kartofler og persillesovs", sourceDish: "d1", prepTimeMinutes: 45, estimatedCost: 62,
     description: "Klassiske frikadeller — svinekød er på tilbud i Netto denne uge.",
-    ingredients: [{name:"Hakket svinekød",quantity:"500 g"},{name:"Kartofler",quantity:"1 kg"},{name:"Mælk",quantity:"3 dl"},{name:"Persille",quantity:"1 bundt"}],
+    ingredients: [{name:"Hakket svinekød",quantity:"500 g"},{name:"Kartofler",quantity:"1 kg"},{name:"Mælk",quantity:"3 dl"},{name:"Persille",quantity:"1 bundt"},{name:"Løg",quantity:"2 stk"}],
     discountIds: ["o-102"] },
   { title: "Pasta med pesto, kylling og spinat", sourceDish: "d2", prepTimeMinutes: 25, estimatedCost: 54,
     description: "Hurtig hverdagsret. Kyllingebryst er nedsat 30% i Rema 1000.",
-    ingredients: [{name:"Kyllingebryst",quantity:"600 g"},{name:"Pasta",quantity:"400 g"},{name:"Pesto",quantity:"1 glas"},{name:"Spinat",quantity:"150 g"}],
+    ingredients: [{name:"Kyllingebryst",quantity:"600 g"},{name:"Pasta",quantity:"400 g"},{name:"Pesto",quantity:"1 glas"},{name:"Spinat",quantity:"150 g"},{name:"Hvidløg",quantity:"1 fed"}],
     discountIds: ["o-118"] },
   { title: "Hjemmelavet pizza med chorizo", sourceDish: "d3", prepTimeMinutes: 90, estimatedCost: 71,
     description: "Fredagsfavorit — dejen kan laves om morgenen.",
@@ -231,7 +284,7 @@ const POOL = [
     discountIds: [] },
   { title: "Grønsagslasagne", sourceDish: "d4", prepTimeMinutes: 60, estimatedCost: 48,
     description: "Bruger squash og aubergine, som du allerede har i køleskabet.",
-    ingredients: [{name:"Lasagneplader",quantity:"1 pk"},{name:"Squash",quantity:"1 stk"},{name:"Revet ost",quantity:"200 g"}],
+    ingredients: [{name:"Lasagneplader",quantity:"1 pk"},{name:"Squash",quantity:"1 stk"},{name:"Revet ost",quantity:"200 g"},{name:"Løg",quantity:"2 stk"},{name:"Hvidløg",quantity:"1 fed"}],
     discountIds: ["o-140"] },
   { title: "Ovnbagt torsk med kartoffelmos", sourceDish: "d5", prepTimeMinutes: 35, estimatedCost: 66,
     description: "Torskefilet er nedsat i Føtex denne uge.",
@@ -239,15 +292,15 @@ const POOL = [
     discountIds: ["o-155"] },
   { title: "Shakshuka med feta", sourceDish: null, prepTimeMinutes: 30, estimatedCost: 39,
     description: "Ny ret i middelhavsstil — matcher din inspiration om mere grønt.",
-    ingredients: [{name:"Hakkede tomater",quantity:"2 dåser"},{name:"Æg",quantity:"6 stk"},{name:"Feta",quantity:"200 g"},{name:"Spidskommen",quantity:"1 tsk"}],
+    ingredients: [{name:"Hakkede tomater",quantity:"2 dåser"},{name:"Æg",quantity:"6 stk"},{name:"Feta",quantity:"200 g"},{name:"Spidskommen",quantity:"1 tsk"},{name:"Løg",quantity:"2 stk"},{name:"Hvidløg",quantity:"1 fed"}],
     discountIds: ["o-160"] },
   { title: "Koreansk bibimbap-skål", sourceDish: null, prepTimeMinutes: 40, estimatedCost: 58,
     description: "Ukendt ret — bruger resterne af risene og gulerødderne fra køleskabet.",
-    ingredients: [{name:"Ris",quantity:"300 g"},{name:"Oksekød i strimler",quantity:"400 g"},{name:"Gochujang",quantity:"2 spsk"},{name:"Gulerødder",quantity:"3 stk"}],
+    ingredients: [{name:"Ris",quantity:"300 g"},{name:"Oksekød i strimler",quantity:"400 g"},{name:"Gochujang",quantity:"2 spsk"},{name:"Gulerødder",quantity:"3 stk"},{name:"Ris",quantity:"300 g"}],
     discountIds: [] },
   { title: "Linsedhal med naan", sourceDish: null, prepTimeMinutes: 35, estimatedCost: 31,
     description: "Billigste forslag i ugen — tørrede linser er nedsat i Lidl.",
-    ingredients: [{name:"Røde linser",quantity:"400 g"},{name:"Kokosmælk",quantity:"1 dåse"},{name:"Naanbrød",quantity:"4 stk"}],
+    ingredients: [{name:"Røde linser",quantity:"400 g"},{name:"Kokosmælk",quantity:"1 dåse"},{name:"Naanbrød",quantity:"4 stk"},{name:"Løg",quantity:"2 stk"}],
     discountIds: ["o-171"] },
   { title: "Kylling i karry med ris", sourceDish: null, prepTimeMinutes: 30, estimatedCost: 52,
     description: "Simpel gryderet, bygger videre på kyllingetilbuddet.",
@@ -271,6 +324,9 @@ const state = {
   currentRunId: null,
   shoppingList: [],         // {name, quantity, from}
   planning: false,
+  selected: {},             // suggestion id -> true (variant C card selection)
+  ingSel: {},               // "<suggId>::<ingredient>" -> bool, built when the review opens
+  toast: null,
   // per-variant ui bits
   ui: { editingFridge: false, showOverride: false, openDays: { 1: true }, modal: null, archiveOpen: false },
 };
@@ -322,6 +378,7 @@ function plan() {
     state.runs.unshift(run);
     state.currentRunId = run.id;
     state.planning = false;
+    state.selected = {}; state.ingSel = {};
     state.ui.openDays = { 1: true };
     render();
   }, 1200);
@@ -355,6 +412,109 @@ function setOverride(patch) {
 function resetOverride() { state.runSettings = null; render(); }
 
 /* ------------------------------------------------------------------ *
+ * Card selection + ingredient review (variant C)                      *
+ * ------------------------------------------------------------------ */
+function toggleSelect(id) {
+  if (state.selected[id]) delete state.selected[id]; else state.selected[id] = true;
+  render();
+}
+function clearSelection() { state.selected = {}; render(); }
+
+// Selected suggestions, in board order (day 1 -> day N).
+function selectedSuggestions() {
+  const run = currentRun();
+  if (!run) return [];
+  const out = [];
+  run.days.forEach(d => d.suggestions.forEach(s => { if (state.selected[s.id]) out.push({ ...s, day: d }); }));
+  return out;
+}
+const selectedCount = () => Object.keys(state.selected).length;
+
+// Ingredients shared by more than one selected dish get a stable tint each,
+// so a duplicate is obvious at a glance in the review.
+function tintMap(suggs) {
+  const counts = {};
+  suggs.forEach(s => s.ingredients.forEach(i => {
+    const k = i.name.toLowerCase().trim();
+    counts[k] = (counts[k] || 0) + 1;
+  }));
+  const map = {}; let n = 0;
+  Object.keys(counts).sort().forEach(k => { if (counts[k] > 1) map[k] = { tint: n++ % 6, count: counts[k] }; });
+  return map;
+}
+
+const ingKey = (suggId, name) => suggId + "::" + name;
+
+function openIngredientReview() {
+  state.ingSel = {};
+  selectedSuggestions().forEach(s => s.ingredients.forEach(i => { state.ingSel[ingKey(s.id, i.name)] = true; }));
+  state.ui.modal = "ingredients";
+  render();
+}
+function toggleIng(key) { state.ingSel[key] = !state.ingSel[key]; render(); }
+function setAllIngs(on) { Object.keys(state.ingSel).forEach(k => state.ingSel[k] = on); render(); }
+const checkedIngCount = () => Object.values(state.ingSel).filter(Boolean).length;
+
+function confirmAddIngredients() {
+  let added = 0;
+  selectedSuggestions().forEach(s => s.ingredients.forEach(i => {
+    if (!state.ingSel[ingKey(s.id, i.name)]) return;
+    if (!state.shoppingList.some(x => x.name === i.name && x.from === s.title)) {
+      state.shoppingList.push({ name: i.name, quantity: i.quantity, from: s.title });
+      added++;
+    }
+  }));
+  state.selected = {}; state.ingSel = {}; state.ui.modal = null;
+  state.toast = added + " ingredient" + (added === 1 ? "" : "s") + " added to the shopping list";
+  render();
+  setTimeout(() => { state.toast = null; render(); }, 2600);
+}
+
+function ingredientReviewModal() {
+  const suggs = selectedSuggestions();
+  const tints = tintMap(suggs);
+  const total = suggs.reduce((n, s) => n + s.ingredients.length, 0);
+  const checked = checkedIngCount();
+  return `
+    <div class="modal-back" onclick="if(event.target===this){state.ui.modal=null;render()}">
+      <div class="modal wide">
+        <h2>Add ingredients</h2>
+        <div class="sub" style="margin-bottom:6px">
+          ${suggs.length} dish${suggs.length === 1 ? "" : "es"} · ${total} ingredients, grouped by dish.
+          Everything starts ticked — untick whatever you already have.
+          ${Object.keys(tints).length ? `<br>Tinted rows are the same ingredient appearing in more than one dish.` : ""}
+        </div>
+        <div style="margin-bottom:10px">
+          <button class="btn ghost" onclick="setAllIngs(true)">Select all</button>
+          <button class="btn ghost" onclick="setAllIngs(false)">Deselect all</button>
+        </div>
+        <div class="scroll">
+          ${suggs.map(s => `
+            <div class="ing-group">
+              <div class="ghd"><span>${esc(s.title)}</span><span class="hint">${s.day.name} · ${s.ingredients.length} ingredients</span></div>
+              ${s.ingredients.map(i => {
+                const key = ingKey(s.id, i.name);
+                const on = !!state.ingSel[key];
+                const t = tints[i.name.toLowerCase().trim()];
+                return `<label class="ing-row ${t ? "tint-" + t.tint : ""} ${on ? "" : "off"}">
+                  <input type="checkbox" ${on ? "checked" : ""} onchange="toggleIng('${key.replace(/'/g, "\\'")}')">
+                  <span class="q">${esc(i.quantity)}</span>
+                  <span class="nm">${esc(i.name)}</span>
+                  ${t ? `<span class="dup">in ${t.count} dishes</span>` : ""}
+                </label>`;
+              }).join("")}
+            </div>`).join("")}
+        </div>
+        <div class="ft">
+          <button class="btn" onclick="state.ui.modal=null;render()">Cancel</button>
+          <button class="btn primary" onclick="confirmAddIngredients()" ${checked ? "" : "disabled"}>
+            Add ${checked} ingredient${checked === 1 ? "" : "s"}</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ------------------------------------------------------------------ *
  * Shared bits of markup                                               *
  * ------------------------------------------------------------------ */
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
@@ -364,8 +524,12 @@ function suggestionCard(sugg, opts = {}) {
   const known = !!sugg.sourceDish;
   const dish = known ? DISHES.find(d => d.id === sugg.sourceDish) : null;
   const added = isAdded(sugg);
+  const sel = opts.selectable && !!state.selected[sugg.id];
+  const inList = state.shoppingList.some(x => x.from === sugg.title);
   return `
-    <div class="sugg">
+    <div class="sugg${opts.selectable ? " selectable" : ""}${sel ? " on" : ""}"
+         ${opts.selectable ? `onclick="toggleSelect('${sugg.id}')"` : ""}>
+      ${sel ? `<div class="selmark">✓</div>` : ""}
       <div class="title">${esc(sugg.title)}</div>
       <div class="desc">${esc(sugg.description)}</div>
       <div class="meta">
@@ -375,11 +539,15 @@ function suggestionCard(sugg, opts = {}) {
         ${sugg.discountIds.length ? `<span class="chip discount">% ${sugg.discountIds.length} on offer</span>` : ""}
       </div>
       ${opts.compact ? "" : `<ul>${sugg.ingredients.map(i => `<li>${esc(i.quantity)} ${esc(i.name)}</li>`).join("")}</ul>`}
-      <div class="acts">
-        ${added
-          ? `<span class="added">✓ Added to shopping list</span>`
-          : `<button class="btn" onclick='addToList(${JSON.stringify(sugg).replace(/'/g, "&#39;")})'>+ Add ingredients</button>`}
-        ${opts.compact ? `<button class="btn ghost" onclick="alert('Prototype: would open the full suggestion')">Details</button>` : ""}
+      <div class="acts" style="display:flex;gap:8px;align-items:center">
+        ${opts.selectable
+          ? `${inList ? `<span class="inlist">✓ in shopping list</span>` : ""}
+             <div style="flex:1"></div>
+             <button class="btn ghost" onclick="event.stopPropagation();alert('Prototype: would open the full suggestion')">Details</button>`
+          : `${added
+              ? `<span class="added">✓ Added to shopping list</span>`
+              : `<button class="btn" onclick='addToList(${JSON.stringify(sugg).replace(/'/g, "&#39;")})'>+ Add ingredients</button>`}
+             ${opts.compact ? `<button class="btn ghost" onclick="alert('Prototype: would open the full suggestion')">Details</button>` : ""}`}
       </div>
     </div>`;
 }
@@ -591,7 +759,7 @@ function VariantC() {
         ${run.days.map(d => `
           <div class="c-col">
             <div class="hd"><span class="daylabel">${d.name}</span><span class="hint">Day ${d.day}</span></div>
-            <div class="stack">${d.suggestions.map(s => suggestionCard(s, { compact: true })).join("")}</div>
+            <div class="stack">${d.suggestions.map(s => suggestionCard(s, { compact: true, selectable: true })).join("")}</div>
           </div>`).join("")}
       </div>` : `<div class="empty">No plan on screen — hit “Plan my week”.</div>`}
     ${state.ui.modal === "fridge" ? `
@@ -604,7 +772,19 @@ function VariantC() {
       <div class="modal-back" onclick="if(event.target===this){state.ui.modal=null;render()}">
         <div class="modal"><h2>Settings for this run</h2>${overrideControls()}
           <div class="ft"><button class="btn primary" onclick="state.ui.modal=null;render()">Done</button></div></div>
-      </div>` : ""}`;
+      </div>` : ""}
+    ${state.ui.modal === "ingredients" ? ingredientReviewModal() : ""}
+    ${selectedCount() ? `
+      <div class="c-actionbar">
+        <div class="left">
+          <strong>${selectedCount()} dish${selectedCount() === 1 ? "" : "es"} selected</strong>
+          <button class="btn ghost" onclick="clearSelection()">Clear</button>
+        </div>
+        <div class="right">
+          <button class="btn primary big" onclick="openIngredientReview()">Add ingredients</button>
+        </div>
+      </div>` : ""}
+    ${state.toast ? `<div class="toast">✓ ${esc(state.toast)}</div>` : ""}`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -617,13 +797,14 @@ const VARIANTS = {
 };
 const keys = Object.keys(VARIANTS);
 function currentVariant() {
-  const v = (new URLSearchParams(location.search).get("variant") || "A").toUpperCase();
-  return VARIANTS[v] ? v : "A";
+  const v = (new URLSearchParams(location.search).get("variant") || "C").toUpperCase();
+  return VARIANTS[v] ? v : "C";
 }
 function setVariant(v) {
   const u = new URL(location.href); u.searchParams.set("variant", v);
   history.replaceState({}, "", u);
   state.ui = { editingFridge: false, showOverride: false, openDays: { 1: true }, modal: null, archiveOpen: false };
+  state.selected = {}; state.ingSel = {};
   render();
 }
 function cycle(step) {
@@ -659,6 +840,8 @@ function render() {
     overriddenForThisRun: isOverridden(),
     runs: state.runs.map(r => ({ id: r.id, status: r.status, days: r.days.length, at: fmtTime(r.createdAt) })),
     currentRun: run ? { id: run.id, status: run.status, days: run.days.length } : null,
+    selectedSuggestions: selectedSuggestions().map(x => x.title),
+    ingredientsTicked: state.ui.modal === "ingredients" ? checkedIngCount() : null,
     shoppingList: state.shoppingList,
   }, null, 1);
 }
