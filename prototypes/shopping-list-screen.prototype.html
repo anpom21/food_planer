@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PROTOTYPE — Shopping List screen</title>
+<!--
+  PROTOTYPE — throwaway. Answers: "what should the Shopping List screen look
+  and behave like?" (issues/8, child of issues/1).
+
+  Three variants, switchable via ?variant=A|B|C, the floating bottom bar, or
+  the arrow keys. Plain HTML/CSS/JS (no framework locked in yet). Open the file
+  directly in a browser. Same setup as the Dish Library / Settings /
+  Plan a Week prototypes.
+
+  Questions this prototype is pressure-testing:
+    - How is the persistent, household-wide ShoppingList presented?
+    - What does ticking an item off do — remove it immediately, or keep it
+      struck-through until an explicit "clear"?
+        A = strike-through, sinks to a Ticked section, explicit clear
+        B = removed immediately, undo toast
+        C = strike-through in place, explicit "Clear ticked"
+    - How does an item trace back to the Suggestion / Dish it came from?
+        A = muted source chips under each item
+        B = grouping IS the provenance (one section per Suggestion)
+        C = detail pane with the full chain (Suggestion → Dish → run → profile)
+    - What is the external export/share mechanism for use in the shop?
+        A = copy plain text (preview + Copy button)
+        B = native share sheet (navigator.share) with copy fallback
+        C = both, behind one Export menu — plus an in-app Shop mode that
+            argues you may not need to export at all
+
+  Cross-cutting question the variants disagree about: the list is
+  household-wide and accumulates over time, so items arrive from different
+  Profiles, different PlanningRuns, and by hand. A merges duplicates by
+  ingredient name; B keeps them separate under each dish; C merges but keeps
+  every source on the item.
+
+  Not wired to anything real. No persistence, no backend. Live state is
+  printed in the "State" panel (bottom-left).
+-->
+<style>
+  :root {
+    --ink: #1c1c1e;
+    --muted: #6b6b70;
+    --line: #dcdcdf;
+    --bg: #f6f6f7;
+    --card: #ffffff;
+    --accent: #2f6f4f;
+    --accent-soft: #e8f1ec;
+    --accent-ink: #ffffff;
+    --warn: #8a5a12;
+    --warn-soft: #fdf3e2;
+    --discount: #a3341f;
+    --discount-soft: #fbeae6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    padding-bottom: 150px;
+    font-size: 14px;
+  }
+  header.app {
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+    padding: 14px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header.app .brand { font-weight: 700; font-size: 15px; }
+  header.app .crumb { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  header.app nav { display: flex; gap: 14px; font-size: 13px; color: var(--muted); }
+  header.app nav .on { color: var(--ink); font-weight: 600; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  input[type="text"], textarea {
+    width: 100%; padding: 9px 10px; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--card); font: inherit; color: inherit;
+  }
+  button { font: inherit; cursor: pointer; }
+  .btn {
+    border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    padding: 8px 14px; border-radius: 8px;
+  }
+  .btn:hover { background: #efefef; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.sm { padding: 5px 10px; font-size: 12.5px; }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--accent); padding: 6px 8px; }
+  .btn.danger { color: var(--discount); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+    padding: 3px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line);
+    color: var(--muted);
+  }
+  .chip.known { background: var(--accent-soft); color: var(--accent); border-color: #cfe3d8; }
+  .chip.unknown { background: #eef0fa; color: #3f4a8a; border-color: #d8dcf0; }
+  .chip.manual { background: var(--warn-soft); color: var(--warn); border-color: #f0dcbb; }
+  .chip.discount { background: var(--discount-soft); color: var(--discount); border-color: #f0d3cc; }
+  .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 28px 10px; }
+  .qty { color: var(--muted); font-size: 12.5px; }
+
+  /* checkbox used by every variant */
+  .tickbox {
+    width: 21px; height: 21px; flex: 0 0 21px; border-radius: 6px;
+    border: 1.5px solid #c2c2c7; background: var(--card);
+    display: flex; align-items: center; justify-content: center;
+    color: transparent; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  .tickbox:hover { border-color: var(--accent); }
+  .tickbox.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tickbox.big { width: 30px; height: 30px; flex-basis: 30px; font-size: 18px; border-radius: 8px; }
+
+  /* modal shell */
+  .backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 900;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .modal {
+    background: var(--card); border-radius: 14px; width: 100%; max-width: 520px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.25); padding: 20px; max-height: 82vh; overflow: auto;
+  }
+  .modal h2 { margin-bottom: 4px; }
+  .modal .acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+  .exportpre {
+    width: 100%; min-height: 210px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; line-height: 1.5; white-space: pre; overflow: auto;
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--bg);
+    margin-top: 10px; resize: vertical;
+  }
+  .toast {
+    position: fixed; bottom: 86px; left: 50%; transform: translateX(-50%); z-index: 990;
+    background: #111; color: #fff; padding: 9px 10px 9px 16px; border-radius: 999px;
+    font-size: 13px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .toast .btn { background: transparent; border-color: #555; color: #fff; }
+  .toast .btn:hover { background: #333; }
+
+  /* --- Variant A: flat merged checklist --- */
+  .a-wrap { max-width: 640px; margin: 0 auto; padding: 24px 20px; }
+  .a-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+  .a-add { display: flex; gap: 8px; margin-bottom: 12px; }
+  .a-list { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .a-row { display: flex; gap: 11px; padding: 11px 14px; border-bottom: 1px solid #eeeef0; align-items: flex-start; }
+  .a-row:last-child { border-bottom: none; }
+  .a-row .body { flex: 1; min-width: 0; }
+  .a-row .name { font-weight: 600; }
+  .a-row .srcs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+  .a-row.done .name, .a-row.done .qty { text-decoration: line-through; color: #a5a5aa; }
+  .a-row.done .srcs { opacity: .45; }
+  .a-sechd {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 14px; background: var(--bg); border-bottom: 1px solid var(--line);
+    font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+  }
+  .a-x { color: #b6b6bb; border: none; background: none; font-size: 15px; padding: 0 2px; }
+  .a-x:hover { color: var(--discount); }
+
+  /* --- Variant B: grouped by Suggestion, tick removes --- */
+  .b-wrap { max-width: 760px; margin: 0 auto; padding: 24px 20px; }
+  .b-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 16px; }
+  .b-group { border: 1px solid var(--line); border-radius: 12px; background: var(--card); margin-bottom: 12px; overflow: hidden; }
+  .b-ghd {
+    display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer;
+    background: linear-gradient(#fff, #fbfbfc); border-bottom: 1px solid transparent;
+  }
+  .b-group.open .b-ghd { border-bottom-color: var(--line); }
+  .b-ghd .caret { color: var(--muted); font-size: 12px; width: 12px; }
+  .b-ghd .t { font-weight: 700; }
+  .b-ghd .meta { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .b-count { font-size: 12px; color: var(--muted); }
+  .b-items { padding: 4px 0 6px; }
+  .b-row { display: flex; align-items: center; gap: 11px; padding: 9px 16px; }
+  .b-row .name { flex: 1; }
+  .b-row.leaving { opacity: 0; transform: translateX(26px); transition: all .18s ease-in; }
+  .b-progress { height: 3px; background: #eeeef0; }
+  .b-progress > i { display: block; height: 100%; background: var(--accent); transition: width .2s; }
+
+  /* --- Variant C: aisle board + detail pane + shop mode --- */
+  .c-top {
+    display: flex; align-items: center; gap: 10px; padding: 12px 20px;
+    background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 40;
+  }
+  .c-top .grow { flex: 1; }
+  .c-split { display: flex; align-items: flex-start; gap: 18px; padding: 18px 20px; }
+  .c-board { flex: 1; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+  .c-aisle { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .c-aisle .hd {
+    padding: 9px 13px; font-size: 12px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--muted); background: var(--bg); border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between;
+  }
+  .c-item { display: flex; align-items: center; gap: 10px; padding: 9px 13px; cursor: pointer; border-bottom: 1px solid #f1f1f3; }
+  .c-item:last-child { border-bottom: none; }
+  .c-item:hover { background: #fafafb; }
+  .c-item.sel { background: var(--accent-soft); }
+  .c-item .name { flex: 1; }
+  .c-item.done .name, .c-item.done .qty { text-decoration: line-through; color: #a5a5aa; }
+  .c-pane {
+    width: 310px; flex: 0 0 310px; position: sticky; top: 74px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px;
+  }
+  .c-pane .k { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; margin-top: 14px; }
+  .c-trace { border-left: 2px solid var(--line); margin-top: 8px; padding-left: 12px; }
+  .c-trace .node { margin-bottom: 10px; font-size: 12.5px; }
+  .c-trace .node b { display: block; font-size: 13px; }
+  .c-trace .node span { color: var(--muted); }
+  .c-menu {
+    position: absolute; right: 20px; top: 52px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.16); z-index: 60; min-width: 230px; overflow: hidden;
+  }
+  .c-menu button {
+    display: block; width: 100%; text-align: left; background: none; border: none;
+    padding: 10px 14px; font-size: 13px; border-bottom: 1px solid #f1f1f3;
+  }
+  .c-menu button:last-child { border-bottom: none; }
+  .c-menu button:hover { background: var(--bg); }
+  .c-menu .d { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  /* shop mode */
+  .shopmode { position: fixed; inset: 0; background: #101014; color: #f2f2f4; z-index: 980; overflow: auto; }
+  .shopmode .hd {
+    position: sticky; top: 0; background: #101014; padding: 16px 18px; display: flex;
+    align-items: center; justify-content: space-between; border-bottom: 1px solid #26262c;
+  }
+  .shopmode .aisle { padding: 16px 18px 4px; font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: #8b8b95; font-weight: 700; }
+  .shopmode .row { display: flex; align-items: center; gap: 14px; padding: 15px 18px; border-bottom: 1px solid #1e1e24; font-size: 17px; }
+  .shopmode .row.done .nm, .shopmode .row.done .q { text-decoration: line-through; color: #5c5c66; }
+  .shopmode .row .nm { flex: 1; }
+  .shopmode .row .q { color: #9a9aa4; font-size: 14px; }
+  .shopmode .tickbox { background: #101014; border-color: #4a4a55; }
+  .shopmode .tickbox.on { background: #45a06e; border-color: #45a06e; }
+
+  /* --- floating prototype switcher --- */
+  #switcher {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    background: #111; color: #fff; border-radius: 999px; padding: 7px 9px;
+    display: flex; align-items: center; gap: 10px; z-index: 999;
+    box-shadow: 0 6px 22px rgba(0,0,0,.3); font-size: 13px;
+  }
+  #switcher button {
+    background: #2c2c2e; color: #fff; border: none; border-radius: 999px;
+    width: 28px; height: 28px; font-size: 14px;
+  }
+  #switcher button:hover { background: #444; }
+  #switcher .lbl { min-width: 270px; text-align: center; font-weight: 600; }
+  #switcher .tag { font-size: 10px; opacity: .55; text-transform: uppercase; letter-spacing: .08em; }
+  #statepanel {
+    position: fixed; bottom: 18px; left: 18px; z-index: 998; max-width: 340px;
+    background: #111; color: #d8d8d8; border-radius: 10px; font-size: 11px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    box-shadow: 0 6px 22px rgba(0,0,0,.3);
+  }
+  #statepanel .hd { padding: 6px 10px; color: #fff; cursor: pointer; font-weight: 700; }
+  #statepanel pre { margin: 0; padding: 0 10px 10px; max-height: 42vh; overflow: auto; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="statepanel"><div class="hd" onclick="toggleState()">▸ State</div><pre id="statejson" style="display:none"></pre></div>
+<div id="switcher"></div>
+
+<script>
+/* ------------------------------------------------------------------ *
+ * Seed data                                                          *
+ *                                                                    *
+ * The ShoppingList is household-wide and persistent: it accumulates   *
+ * across PlanningRuns and Profiles, and is only emptied by ticking    *
+ * things off. So the seed deliberately mixes:                         *
+ *   - items from two different runs, by two different Profiles        *
+ *   - an ingredient that two Suggestions both need (Onions, Garlic)   *
+ *   - a Suggestion from a known Dish and one the LLM invented         *
+ *   - a hand-added item with no Suggestion behind it at all           *
+ *   - a couple already ticked, so "what happens to ticked items" is   *
+ *     visible on load in every variant                                *
+ * ------------------------------------------------------------------ */
+
+const SOURCES = {
+  s1: { suggestion: "Chili con carne", dish: "Chili con carne", kind: "known",
+        run: "run_0142", runLabel: "Mon 18 Aug · week plan", day: "Monday", profile: "Andreas" },
+  s2: { suggestion: "Lasagne", dish: "Lasagne", kind: "known",
+        run: "run_0142", runLabel: "Mon 18 Aug · week plan", day: "Wednesday", profile: "Andreas" },
+  s3: { suggestion: "Miso-glazed salmon with sesame greens", dish: null, kind: "unknown",
+        run: "run_0142", runLabel: "Mon 18 Aug · week plan", day: "Thursday", profile: "Andreas" },
+  s4: { suggestion: "Pancakes", dish: "Pancakes", kind: "known",
+        run: "run_0139", runLabel: "Sat 16 Aug · weekend plan", day: "Sunday", profile: "Maria" },
+};
+
+let uid = 100;
+function item(name, qty, aisle, srcIds, ticked, manualNote) {
+  return {
+    id: "i" + (++uid), name, qty, aisle,
+    sources: srcIds.map(id => ({ id, ...SOURCES[id] })),
+    manualNote: manualNote || null,
+    ticked: !!ticked,
+    addedAt: srcIds.length ? SOURCES[srcIds[0]].runLabel : "added by hand",
+    addedBy: srcIds.length ? SOURCES[srcIds[0]].profile : "Andreas",
+  };
+}
+
+const state = {
+  profile: "Andreas",
+  list: [
+    item("Minced beef", "500 g", "Meat & fish", ["s1"]),
+    item("Kidney beans", "2 tins", "Pantry", ["s1"]),
+    item("Chopped tomatoes", "3 tins", "Pantry", ["s1", "s2"]),
+    item("Onions", "4", "Produce", ["s1", "s2"]),
+    item("Garlic", "1 bulb", "Produce", ["s1", "s2", "s3"]),
+    item("Lasagne sheets", "1 pack", "Pantry", ["s2"]),
+    item("Mozzarella", "200 g", "Dairy", ["s2"], true),
+    item("Salmon fillets", "2", "Meat & fish", ["s3"]),
+    item("White miso paste", "1 jar", "Pantry", ["s3"]),
+    item("Pak choi", "2 heads", "Produce", ["s3"]),
+    item("Sesame seeds", "1 bag", "Pantry", ["s3"], true),
+    item("Flour", "1 kg", "Pantry", ["s4"]),
+    item("Eggs", "12", "Dairy", ["s4"]),
+    item("Milk", "1 L", "Dairy", ["s2", "s4"]),
+    item("Coffee", "500 g", "Pantry", [], false, "not for a dish — we're out"),
+    item("Dish soap", "1", "Other", [], true, "not for a dish"),
+  ],
+  ui: {
+    showTicked: true,          // A
+    openGroups: { s1: true, s2: true, s3: false, s4: false }, // B
+    selectedId: null,          // C
+    exportOpen: false,         // C menu
+    shopMode: false,           // C
+    modal: null,               // { kind: "export"|"share", scope }
+    draft: "",
+  },
+  toast: null,
+  undo: null,
+};
+
+const AISLES = ["Produce", "Meat & fish", "Dairy", "Pantry", "Frozen", "Other"];
+
+/* Variant B deletes items as they're ticked, so "3 of 5 bought" needs the
+   original count captured up front. */
+const ORIGINAL_COUNT = {};
+Object.keys(SOURCES).forEach(sid => {
+  ORIGINAL_COUNT[sid] = state.list.filter(i => i.sources.some(s => s.id === sid)).length;
+});
+ORIGINAL_COUNT.manual = state.list.filter(i => !i.sources.length).length;
+
+/* ------------------------------------------------------------------ *
+ * Shared helpers                                                      *
+ * ------------------------------------------------------------------ */
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function open$(id) { return state.list.find(i => i.id === id); }
+function openItems() { return state.list.filter(i => !i.ticked); }
+function tickedItems() { return state.list.filter(i => i.ticked); }
+
+function toggleTick(id) {
+  const it = open$(id);
+  it.ticked = !it.ticked;
+  render();
+}
+/* Variant B only: ticking deletes the item outright, with an undo window. */
+function tickAndRemove(id) {
+  const idx = state.list.findIndex(i => i.id === id);
+  const removed = state.list[idx];
+  const row = document.querySelector('[data-row="' + id + '"]');
+  const commit = () => {
+    state.list.splice(idx, 1);
+    state.undo = { item: removed, idx };
+    flash("“" + removed.name + "” bought", "Undo", () => {
+      state.list.splice(state.undo.idx, 0, state.undo.item);
+      state.undo = null;
+      render();
+    });
+    render();
+  };
+  if (row) { row.classList.add("leaving"); setTimeout(commit, 170); } else commit();
+}
+function removeItem(id) {
+  state.list = state.list.filter(i => i.id !== id);
+  render();
+}
+function clearTicked() {
+  const n = tickedItems().length;
+  state.list = openItems();
+  flash(n + " ticked item" + (n === 1 ? "" : "s") + " cleared");
+  render();
+}
+function addManual() {
+  const v = (state.ui.draft || "").trim();
+  if (!v) return;
+  state.list.push(item(v, "", "Other", [], false, "added by hand"));
+  state.ui.draft = "";
+  render();
+  const el = document.getElementById("manualinput");
+  if (el) el.focus();
+}
+
+let toastTimer = null;
+function flash(msg, actionLabel, action) {
+  state.toast = { msg, actionLabel, action };
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { state.toast = null; render(); }, 4200);
+}
+window.__undoAction = null;
+function toastHTML() {
+  if (!state.toast) return "";
+  window.__undoAction = state.toast.action || null;
+  const btn = state.toast.actionLabel
+    ? '<button class="btn sm" onclick="(window.__undoAction||function(){})();state.toast=null;render()">'
+      + esc(state.toast.actionLabel) + "</button>"
+    : "";
+  return '<div class="toast">' + esc(state.toast.msg) + btn + "</div>";
+}
+
+/* --- export text: the thing you actually take to the shop --- */
+function exportText(opts) {
+  opts = opts || {};
+  const items = opts.items || openItems();
+  const lines = ["Shopping list — Food Planner", ""];
+  if (opts.byAisle) {
+    AISLES.forEach(a => {
+      const rows = items.filter(i => i.aisle === a);
+      if (!rows.length) return;
+      lines.push(a.toUpperCase());
+      rows.forEach(i => lines.push("  [ ] " + i.name + (i.qty ? " — " + i.qty : "")));
+      lines.push("");
+    });
+  } else {
+    items.forEach(i => lines.push("[ ] " + i.name + (i.qty ? " — " + i.qty : "")));
+    lines.push("");
+  }
+  if (opts.withSources) {
+    lines.push("For: " + [...new Set(items.flatMap(i => i.sources.map(s => s.suggestion)))].join(", "));
+  }
+  return lines.join("\n");
+}
+function copyExport(text) {
+  navigator.clipboard && navigator.clipboard.writeText(text);
+  flash("Copied to clipboard");
+  state.ui.modal = null;
+  render();
+}
+function nativeShare(text) {
+  if (navigator.share) {
+    navigator.share({ title: "Shopping list", text }).catch(() => {});
+    flash("Share sheet opened");
+  } else {
+    flash("navigator.share unavailable here — falling back to copy");
+    navigator.clipboard && navigator.clipboard.writeText(text);
+  }
+  state.ui.modal = null;
+  state.ui.exportOpen = false;
+  render();
+}
+
+function header(sub) {
+  return '<header class="app">'
+    + '<div><div class="brand">Food Planner</div><div class="crumb">' + esc(sub) + "</div></div>"
+    + '<nav><span>Dish Library</span><span>Plan a Week</span><span>Settings</span>'
+    + '<span class="on">Shopping List</span></nav></header>';
+}
+
+function sourceChip(s) {
+  const cls = s.kind === "known" ? "known" : "unknown";
+  return '<span class="chip ' + cls + '">' + (s.kind === "known" ? "🍽" : "✨") + " " + esc(s.suggestion) + "</span>";
+}
+
+/* ------------------------------------------------------------------ *
+ * VARIANT A — flat merged checklist                                   *
+ *                                                                     *
+ * One column, one row per ingredient, whatever it came from. Sources   *
+ * ride along as small muted chips under the name — provenance is       *
+ * present but never the organising principle. Ticking strikes the row  *
+ * out and sinks it into a "Ticked" section at the bottom; nothing      *
+ * leaves the list until you press "Clear ticked". Export is a single   *
+ * plain-text copy.                                                     *
+ * ------------------------------------------------------------------ */
+function VariantA() {
+  const open = openItems(), done = tickedItems();
+  const rows = its => its.map(i => {
+    const srcs = i.sources.length
+      ? i.sources.map(sourceChip).join("")
+      : '<span class="chip manual">✎ added by hand</span>';
+    return '<div class="a-row ' + (i.ticked ? "done" : "") + '">'
+      + '<div class="tickbox ' + (i.ticked ? "on" : "") + '" onclick="toggleTick(\'' + i.id + '\')">✓</div>'
+      + '<div class="body"><div class="name">' + esc(i.name)
+      + (i.qty ? ' <span class="qty">· ' + esc(i.qty) + "</span>" : "")
+      + '</div><div class="srcs">' + srcs + "</div></div>"
+      + '<button class="a-x" title="Remove" onclick="removeItem(\'' + i.id + '\')">✕</button>'
+      + "</div>";
+  }).join("");
+
+  return header("Shopping List · shared by the whole household")
+    + '<div class="a-wrap">'
+    + '<div class="a-bar"><div><h1>Shopping list</h1>'
+    + '<div class="sub">' + open.length + " to buy · " + done.length + " ticked</div></div>"
+    + '<button class="btn primary" onclick="state.ui.modal={kind:\'export\'};render()">Copy list</button></div>'
+
+    + '<div class="a-add"><input id="manualinput" type="text" placeholder="Add something not from a dish…" '
+    + 'value="' + esc(state.ui.draft) + '" oninput="state.ui.draft=this.value" '
+    + 'onkeydown="if(event.key===\'Enter\')addManual()">'
+    + '<button class="btn" onclick="addManual()">Add</button></div>'
+
+    + '<div class="a-list">'
+    + (open.length ? rows(open) : '<div class="empty">Nothing left to buy. 🎉</div>')
+    + (done.length
+        ? '<div class="a-sechd"><span>Ticked · ' + done.length + "</span>"
+          + '<button class="btn sm danger" onclick="clearTicked()">Clear ticked</button></div>'
+          + (state.ui.showTicked ? rows(done) : "")
+        : "")
+    + "</div>"
+    + '<div class="sub" style="margin-top:12px">Ticked items stay struck through until you clear them, '
+    + "so you can un-tick a mistake at the till.</div>"
+    + "</div>"
+    + (state.ui.modal ? exportModalA() : "")
+    + toastHTML();
+}
+function exportModalA() {
+  const text = exportText({});
+  return '<div class="backdrop" onclick="if(event.target===this){state.ui.modal=null;render()}">'
+    + '<div class="modal"><h2>Take this to the shop</h2>'
+    + '<div class="sub">Plain text — paste it anywhere. Only unticked items are included.</div>'
+    + '<textarea class="exportpre" readonly>' + esc(text) + "</textarea>"
+    + '<div class="acts"><button class="btn" onclick="state.ui.modal=null;render()">Close</button>'
+    + '<button class="btn primary" onclick="copyExport(' + JSON.stringify(text).replace(/"/g, "&quot;") + ')">Copy</button>'
+    + "</div></div></div>";
+}
+
+/* ------------------------------------------------------------------ *
+ * VARIANT B — grouped by Suggestion, ticking removes                  *
+ *                                                                     *
+ * The list is organised by what you're cooking: one collapsible group  *
+ * per Suggestion, so provenance is the structure rather than a label.  *
+ * Ticking removes the item on the spot (undo toast); a group vanishes  *
+ * once it's empty, which doubles as "that dish is fully bought".       *
+ * Export uses the native share sheet, per group or for everything.     *
+ * ------------------------------------------------------------------ */
+function VariantB() {
+  // Same ingredient needed by two dishes shows up under both.
+  const groups = Object.keys(SOURCES).map(sid => ({
+    sid, ...SOURCES[sid],
+    items: state.list.filter(i => i.sources.some(s => s.id === sid)),
+  })).filter(g => g.items.length);
+
+  const manual = state.list.filter(i => !i.sources.length);
+  if (manual.length) {
+    groups.push({ sid: "manual", suggestion: "Not for a dish", kind: "manual",
+                  dish: null, day: "", profile: "", items: manual });
+  }
+
+  const groupHTML = g => {
+    const open = state.ui.openGroups[g.sid];
+    const total = g.items.length;
+    const chip = g.kind === "manual"
+      ? '<span class="chip manual">✎ by hand</span>'
+      : (g.kind === "known"
+          ? '<span class="chip known">🍽 from your library</span>'
+          : '<span class="chip unknown">✨ new to you</span>');
+    const orig = Math.max(ORIGINAL_COUNT[g.sid] || total, total);
+    const bought = orig - total;
+    return '<div class="b-group ' + (open ? "open" : "") + '">'
+      + '<div class="b-ghd" onclick="state.ui.openGroups[\'' + g.sid + '\']=!state.ui.openGroups[\'' + g.sid + '\'];render()">'
+      + '<span class="caret">' + (open ? "▾" : "▸") + "</span>"
+      + '<div><div class="t">' + esc(g.suggestion) + "</div>"
+      + '<div class="sub" style="font-size:12px">' + (g.day ? esc(g.day) + " · " : "")
+      + (g.profile ? "planned by " + esc(g.profile) : "added by you") + "</div></div>"
+      + '<div class="meta">' + chip
+      + '<span class="b-count">' + bought + " of " + orig + " bought</span>"
+      + '<button class="btn sm" onclick="event.stopPropagation();shareGroup(\'' + g.sid + '\')">Share</button></div></div>'
+      + '<div class="b-progress"><i style="width:' + Math.round((bought / orig) * 100) + '%"></i></div>'
+      + (open ? '<div class="b-items">' + g.items.map(i =>
+          '<div class="b-row" data-row="' + i.id + '">'
+          + '<div class="tickbox" onclick="tickAndRemove(\'' + i.id + '\')">✓</div>'
+          + '<div class="name">' + esc(i.name)
+          + (i.qty ? ' <span class="qty">· ' + esc(i.qty) + "</span>" : "")
+          + (i.sources.length > 1
+              ? ' <span class="chip">also for ' + esc(i.sources.filter(s => s.id !== g.sid).map(s => s.suggestion).join(", ")) + "</span>"
+              : "")
+          + "</div>"
+          + '<button class="a-x" title="Remove without buying" onclick="removeItem(\'' + i.id + '\')">✕</button>'
+          + "</div>").join("") + "</div>"
+        : "")
+      + "</div>";
+  };
+
+  return header("Shopping List · shared by the whole household")
+    + '<div class="b-wrap">'
+    + '<div class="b-bar"><div><h1>Shopping list</h1>'
+    + '<div class="sub">' + state.list.length + " items across " + groups.length + " dishes · ticking an item buys it and removes it</div></div>"
+    + '<button class="btn primary" onclick="shareAll()">Share list</button></div>'
+    + '<div class="a-add"><input id="manualinput" type="text" placeholder="Add something not from a dish…" '
+    + 'value="' + esc(state.ui.draft) + '" oninput="state.ui.draft=this.value" '
+    + 'onkeydown="if(event.key===\'Enter\')addManual()">'
+    + '<button class="btn" onclick="addManual()">Add</button></div>'
+    + (groups.length ? groups.map(groupHTML).join("") : '<div class="card empty">Nothing to buy. 🎉</div>')
+    + "</div>"
+    + toastHTML();
+}
+function shareGroup(sid) {
+  const items = sid === "manual"
+    ? state.list.filter(i => !i.sources.length)
+    : state.list.filter(i => i.sources.some(s => s.id === sid));
+  nativeShare(exportText({ items }));
+}
+function shareAll() { nativeShare(exportText({ withSources: true })); }
+
+/* ------------------------------------------------------------------ *
+ * VARIANT C — aisle board + detail pane + shop mode                   *
+ *                                                                     *
+ * Items are grouped the way a shop is laid out, not the way they were  *
+ * planned. Provenance moves out of the row entirely into a detail pane *
+ * (the full chain: Suggestion → Dish → PlanningRun → Profile), so the  *
+ * rows stay dense. Ticking strikes through in place; "Clear ticked"    *
+ * empties them. Export offers copy AND share behind one menu — and     *
+ * "Shop mode" is the argument that you may not need to export at all.  *
+ * ------------------------------------------------------------------ */
+function VariantC() {
+  if (state.ui.shopMode) return shopModeHTML();
+  const sel = state.ui.selectedId ? open$(state.ui.selectedId) : null;
+  const done = tickedItems().length;
+
+  const board = AISLES.map(a => {
+    const rows = state.list.filter(i => i.aisle === a);
+    if (!rows.length) return "";
+    const left = rows.filter(i => !i.ticked).length;
+    return '<div class="c-aisle"><div class="hd"><span>' + esc(a) + "</span><span>" + left + " left</span></div>"
+      + rows.map(i =>
+          '<div class="c-item ' + (i.ticked ? "done " : "") + (sel && sel.id === i.id ? "sel" : "")
+          + '" onclick="state.ui.selectedId=\'' + i.id + '\';render()">'
+          + '<div class="tickbox ' + (i.ticked ? "on" : "") + '" onclick="event.stopPropagation();toggleTick(\'' + i.id + '\')">✓</div>'
+          + '<div class="name">' + esc(i.name) + "</div>"
+          + (i.qty ? '<div class="qty">' + esc(i.qty) + "</div>" : "")
+          + (i.sources.length > 1 ? '<span class="chip">×' + i.sources.length + "</span>" : "")
+          + "</div>").join("")
+      + "</div>";
+  }).join("");
+
+  return header("Shopping List · shared by the whole household")
+    + '<div class="c-top">'
+    + "<div><b>Shopping list</b> <span class=\"sub\">· " + openItems().length + " to buy</span></div>"
+    + '<div class="grow"></div>'
+    + (done ? '<button class="btn sm danger" onclick="clearTicked()">Clear ticked (' + done + ")</button>" : "")
+    + '<button class="btn sm" onclick="state.ui.exportOpen=!state.ui.exportOpen;render()">Export ▾</button>'
+    + '<button class="btn sm primary" onclick="state.ui.shopMode=true;state.ui.exportOpen=false;render()">Shop mode</button>'
+    + "</div>"
+    + (state.ui.exportOpen ? exportMenuC() : "")
+    + '<div class="c-split"><div class="c-board">' + board + "</div>"
+    + '<div class="c-pane">' + (sel ? paneHTML(sel) : panePlaceholder()) + "</div></div>"
+    + (state.ui.modal ? exportModalC() : "")
+    + toastHTML();
+}
+function panePlaceholder() {
+  return "<h2>Where did this come from?</h2>"
+    + '<div class="sub">Pick an item to see the Suggestion, Dish and planning run behind it — '
+    + "and who in the household put it on the list.</div>"
+    + '<div class="k">Add by hand</div>'
+    + '<div class="a-add" style="margin-top:8px"><input id="manualinput" type="text" placeholder="e.g. Coffee" '
+    + 'value="' + esc(state.ui.draft) + '" oninput="state.ui.draft=this.value" '
+    + 'onkeydown="if(event.key===\'Enter\')addManual()"></div>';
+}
+function paneHTML(i) {
+  const trace = i.sources.length
+    ? i.sources.map(s =>
+        '<div class="node"><b>' + esc(s.suggestion) + "</b>"
+        + "<span>" + (s.kind === "known"
+            ? "known dish · from your library (" + esc(s.dish) + ")"
+            : "unknown dish · invented by the LLM")
+        + "<br>" + esc(s.day) + " of " + esc(s.runLabel)
+        + "<br>planned by " + esc(s.profile) + "</span></div>").join("")
+    : '<div class="node"><b>Added by hand</b><span>' + esc(i.manualNote || "no dish behind this one") + "</span></div>";
+  return '<div style="display:flex;align-items:flex-start;gap:10px">'
+    + '<div class="tickbox ' + (i.ticked ? "on" : "") + '" onclick="toggleTick(\'' + i.id + '\')">✓</div>'
+    + "<div><h2 style=\"margin:0\">" + esc(i.name) + "</h2>"
+    + '<div class="sub">' + esc(i.qty || "no quantity") + " · " + esc(i.aisle) + "</div></div></div>"
+    + '<div class="k">Needed for ' + (i.sources.length > 1 ? i.sources.length + " dishes" : "") + "</div>"
+    + '<div class="c-trace">' + trace + "</div>"
+    + '<div class="k">On the list since</div><div class="sub">' + esc(i.addedAt) + " · " + esc(i.addedBy) + "</div>"
+    + '<div style="margin-top:16px;display:flex;gap:8px">'
+    + '<button class="btn sm" onclick="state.ui.selectedId=null;render()">Close</button>'
+    + '<button class="btn sm danger" onclick="removeItem(\'' + i.id + '\')">Remove</button></div>';
+}
+function exportMenuC() {
+  const flat = exportText({});
+  const byAisle = exportText({ byAisle: true });
+  return '<div class="c-menu">'
+    + '<button onclick="state.ui.modal={kind:\'export\',by:false};state.ui.exportOpen=false;render()">Copy as plain text'
+    + '<span class="d">Flat checklist, unticked items only</span></button>'
+    + '<button onclick="state.ui.modal={kind:\'export\',by:true};state.ui.exportOpen=false;render()">Copy grouped by aisle'
+    + '<span class="d">Produce, meat, dairy, pantry…</span></button>'
+    + '<button onclick="nativeShare(' + JSON.stringify(byAisle).replace(/"/g, "&quot;") + ')">Share…'
+    + '<span class="d">Native share sheet (Messages, Notes, WhatsApp)</span></button>'
+    + "</div>";
+}
+function exportModalC() {
+  const text = exportText({ byAisle: !!state.ui.modal.by });
+  return '<div class="backdrop" onclick="if(event.target===this){state.ui.modal=null;render()}">'
+    + '<div class="modal"><h2>Export</h2><div class="sub">Only unticked items are included.</div>'
+    + '<textarea class="exportpre" readonly>' + esc(text) + "</textarea>"
+    + '<div class="acts"><button class="btn" onclick="state.ui.modal=null;render()">Close</button>'
+    + '<button class="btn" onclick="nativeShare(' + JSON.stringify(text).replace(/"/g, "&quot;") + ')">Share…</button>'
+    + '<button class="btn primary" onclick="copyExport(' + JSON.stringify(text).replace(/"/g, "&quot;") + ')">Copy</button>'
+    + "</div></div></div>";
+}
+function shopModeHTML() {
+  const body = AISLES.map(a => {
+    const rows = state.list.filter(i => i.aisle === a);
+    if (!rows.length) return "";
+    return '<div class="aisle">' + esc(a) + "</div>"
+      + rows.map(i => '<div class="row ' + (i.ticked ? "done" : "") + '" onclick="toggleTick(\'' + i.id + '\')">'
+          + '<div class="tickbox big ' + (i.ticked ? "on" : "") + '">✓</div>'
+          + '<div class="nm">' + esc(i.name) + "</div>"
+          + '<div class="q">' + esc(i.qty) + "</div></div>").join("");
+  }).join("");
+  return '<div class="shopmode"><div class="hd"><div><b>Shop mode</b>'
+    + '<div style="font-size:12px;color:#8b8b95">' + openItems().length + " left · tap a row to tick it off</div></div>"
+    + '<button class="btn" onclick="state.ui.shopMode=false;render()">Done</button></div>'
+    + body + '<div style="height:60px"></div></div>';
+}
+
+/* ------------------------------------------------------------------ *
+ * Switcher + render                                                   *
+ * ------------------------------------------------------------------ */
+const VARIANTS = {
+  A: { name: "Flat checklist · clear ticked", fn: VariantA },
+  B: { name: "Grouped by dish · tick removes", fn: VariantB },
+  C: { name: "Aisle board · detail pane · shop mode", fn: VariantC },
+};
+const keys = Object.keys(VARIANTS);
+function currentVariant() {
+  const v = (new URLSearchParams(location.search).get("variant") || "A").toUpperCase();
+  return VARIANTS[v] ? v : "A";
+}
+function setVariant(v) {
+  const u = new URL(location.href); u.searchParams.set("variant", v);
+  history.replaceState({}, "", u);
+  state.ui.modal = null; state.ui.selectedId = null;
+  state.ui.exportOpen = false; state.ui.shopMode = false;
+  state.toast = null;
+  // B has no "ticked but still here" state at all — anything ticked in A or C
+  // would already be gone in B's model, so drop it on the way in.
+  if (v === "B") state.list = state.list.filter(i => !i.ticked);
+  render();
+}
+function cycle(step) {
+  const i = keys.indexOf(currentVariant());
+  setVariant(keys[(i + step + keys.length) % keys.length]);
+}
+document.addEventListener("keydown", e => {
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  if (e.key === "ArrowLeft") cycle(-1);
+  if (e.key === "ArrowRight") cycle(1);
+});
+function toggleState() {
+  const pre = document.getElementById("statejson");
+  const hd = document.querySelector("#statepanel .hd");
+  const show = pre.style.display === "none";
+  pre.style.display = show ? "block" : "none";
+  hd.textContent = (show ? "▾" : "▸") + " State";
+}
+function render() {
+  const v = currentVariant();
+  document.getElementById("root").innerHTML = VARIANTS[v].fn();
+  document.getElementById("switcher").innerHTML =
+    '<button onclick="cycle(-1)">‹</button>'
+    + '<div class="lbl"><div class="tag">prototype variant</div>' + v + " — " + VARIANTS[v].name + "</div>"
+    + '<button onclick="cycle(1)">›</button>';
+  document.getElementById("statejson").textContent = JSON.stringify({
+    variant: v,
+    profile: state.profile,
+    totalItems: state.list.length,
+    toBuy: openItems().length,
+    ticked: tickedItems().length,
+    tickBehaviour: v === "B" ? "removed on tick (undo toast)" : "struck through until cleared",
+    provenance: v === "A" ? "source chips per row"
+              : v === "B" ? "grouping by Suggestion"
+              : "detail pane (Suggestion → Dish → run → profile)",
+    export: v === "A" ? "copy plain text" : v === "B" ? "navigator.share" : "copy + share + shop mode",
+    list: state.list.map(i => ({
+      name: i.name, qty: i.qty, aisle: i.aisle, ticked: i.ticked,
+      for: i.sources.map(s => s.suggestion),
+    })),
+  }, null, 1);
+  const inp = document.getElementById("manualinput");
+  if (inp && document.activeElement !== inp && state.ui.draft) {
+    inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+  }
+}
+render();
+</script>
+</body>
+</html>
