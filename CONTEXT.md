@@ -35,8 +35,12 @@ _Avoid_: New dish, novel dish (older phrasing — "unknown" is now the canonical
 Freeform text on a PlanningSettings describing the kinds of unknown dishes the person is curious to try. Used to steer the LLM when a planning run favors unknown dishes over known ones.
 
 **FridgeContext**:
-Freeform text and/or images describing what's currently in the fridge, shared at the Household level. Stored and passed to the LLM as-is — never parsed into a structured ingredient list.
+Freeform text plus zero or more FridgeImages describing what's currently in the fridge, shared at the Household level. Stored and passed to the LLM as-is — never parsed into a structured ingredient list.
 _Avoid_: Pantry, inventory (implies structured, itemized stock, which this isn't)
+
+**FridgeImage**:
+A photo attached to the FridgeContext. Persists until someone removes it, and is shown to the LLM directly on every PlanningRun rather than being turned into text first.
+_Avoid_: Attachment, upload, scan (name the act of adding one, not the thing); a transient image summarised once and discarded — an earlier model of this, now rejected
 
 **PlanningSettings**:
 Per-Profile configuration for a planning run: number of days to plan, suggestions per day (default 3/day), known-vs-unknown dish preference, priority order (cheap / quick & easy / delicious / healthy), preferred shops, and Inspiration text.
@@ -48,6 +52,18 @@ One invocation of the LLM for a given Profile, producing a set of Suggestions fo
 One LLM-generated meal recommendation produced by a PlanningRun: title, brief description, ingredients, and possibly more. May optionally reference the Dish it was pulled from (`sourceDish`) — a known dish; if absent, it's an unknown dish the LLM invented.
 _Avoid_: Recipe suggestion, recommendation
 
+**Offer**:
+One discounted product at one shop for a limited period, fetched from an external discount source. Steers a PlanningRun toward cheaper meals, and may be tied to a particular ingredient of a Suggestion.
+_Avoid_: Deal, discount, promotion, campaign
+
+**DiscountData**:
+The set of Offers gathered for a single PlanningRun, filtered down to food and ranked before it reaches the LLM. Describes one week's prices only — never accumulated into a library.
+_Avoid_: Discounts, offer list
+
 **ShoppingList**:
 One persistent, household-wide list of ingredients to buy. Accumulates items from any Profile's Suggestions over time (not scoped to a single PlanningRun or week) and is only cleared as items are ticked off / bought.
 _Avoid_: Ingredients list (both names were used loosely in early discussion; ShoppingList is the canonical term)
+
+**ShoppingList item**:
+One ingredient wanted by one Suggestion — the unit the ShoppingList stores. Several items for the same ingredient are read as a single merged line naming each Suggestion behind it, so the stored shape and the read shape differ on purpose.
+_Avoid_: Line, row, entry (each has been used loosely for both the stored item and the merged view of several)
