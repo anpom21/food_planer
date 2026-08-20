@@ -55,10 +55,10 @@ def _join_total(parsed: list[tuple[float | None, str]]) -> str:
     # tokens so nothing is silently dropped or wrongly summed.
     order: list[str] = []
     sums: dict[str, float] = {}
-    opaque: list[tuple[int, str]] = []
+    opaque: list[str] = []
     for number, unit in parsed:
         if number is None:
-            opaque.append((len(order) + len(opaque), unit))
+            opaque.append(unit)
             continue
         if unit not in sums:
             sums[unit] = 0.0
@@ -66,7 +66,7 @@ def _join_total(parsed: list[tuple[float | None, str]]) -> str:
         sums[unit] += number
 
     tokens = [f"{format_number(sums[u])} {u}".strip() for u in order]
-    tokens += [text for _, text in opaque]
+    tokens += opaque
     return " and ".join(token for token in tokens if token)
 
 
