@@ -13,15 +13,26 @@
   directly in a browser. Same setup as the Dish Library / Settings /
   Plan a Week prototypes.
 
-  Questions this prototype is pressure-testing:
-    - How is the persistent, household-wide ShoppingList presented?
-    - What does ticking an item off do — remove it immediately, or keep it
-      struck-through until an explicit "clear"?
-        A = strike-through, sinks to a Ticked section, explicit clear
-        B = removed immediately, undo toast
-        C = strike-through in place, explicit "Clear ticked"
+  --- Settled, so shared by all three variants ------------------------------
+
+  TICKING: ticking an item strikes it through in place, it sits there for
+  3 seconds, then fades out over 1 second and is gone. The 3-second window IS
+  the undo — un-tick inside it and the item stays, timers cancelled. No
+  "Ticked" section, no "Clear ticked" button, no undo toast: the list clears
+  itself. (See TICK_DWELL_MS / TICK_FADE_MS below.)
+
+  QUANTITIES: an item's headline amount is the SUM across every dish that
+  wants it, and each dish's own share is shown as a bare unitless number —
+  the unit is stated once on the total. So potatoes wanted 800 g by
+  Frikadeller and 400 g by the salmon read as "1200 g" with "Frikadeller 800"
+  and "Miso-glazed salmon 400" beside them. Where two dishes ask in units
+  that don't match, the amounts are joined rather than summed and each dish
+  keeps its full amount.
+
+  --- Still open, and what the variants disagree about ----------------------
+
     - How does an item trace back to the Suggestion / Dish it came from?
-        A = muted source chips under each item
+        A = source chips per row, each carrying that dish's number
         B = grouping IS the provenance (one section per Suggestion)
         C = detail pane with the full chain (Suggestion → Dish → run → profile)
     - What is the external export/share mechanism for use in the shop?
@@ -29,12 +40,13 @@
         B = native share sheet (navigator.share) with copy fallback
         C = both, behind one Export menu — plus an in-app Shop mode that
             argues you may not need to export at all
+    - Is an ingredient wanted by two dishes one row or two?
+        A, C = one merged row; B = one row under each dish
 
-  Cross-cutting question the variants disagree about: the list is
-  household-wide and accumulates over time, so items arrive from different
-  Profiles, different PlanningRuns, and by hand. A merges duplicates by
-  ingredient name; B keeps them separate under each dish; C merges but keeps
-  every source on the item.
+  The list is household-wide and accumulates over time, so the seed mixes two
+  PlanningRuns, two Profiles, known dishes and an LLM-invented one, several
+  ingredients shared across dishes, and two hand-added items with no dish
+  behind them.
 
   Not wired to anything real. No persistence, no backend. Live state is
   printed in the "State" panel (bottom-left).
@@ -89,9 +101,7 @@
   .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   .btn.primary:hover { filter: brightness(1.08); }
   .btn.sm { padding: 5px 10px; font-size: 12.5px; }
-  .btn.ghost { border-color: transparent; background: transparent; color: var(--accent); padding: 6px 8px; }
   .btn.danger { color: var(--discount); }
-  .btn:disabled { opacity: .5; cursor: not-allowed; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
   .chip {
     display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
@@ -101,11 +111,12 @@
   .chip.known { background: var(--accent-soft); color: var(--accent); border-color: #cfe3d8; }
   .chip.unknown { background: #eef0fa; color: #3f4a8a; border-color: #d8dcf0; }
   .chip.manual { background: var(--warn-soft); color: var(--warn); border-color: #f0dcbb; }
-  .chip.discount { background: var(--discount-soft); color: var(--discount); border-color: #f0d3cc; }
+  /* the per-dish share of a shared ingredient — bare number, unit lives on the total */
+  .chip .n { font-variant-numeric: tabular-nums; opacity: .75; font-weight: 700; }
   .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 28px 10px; }
-  .qty { color: var(--muted); font-size: 12.5px; }
+  .qty { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 
-  /* checkbox used by every variant */
+  /* --- shared ticking behaviour: strike through, dwell, fade out --- */
   .tickbox {
     width: 21px; height: 21px; flex: 0 0 21px; border-radius: 6px;
     border: 1.5px solid #c2c2c7; background: var(--card);
@@ -115,6 +126,11 @@
   .tickbox:hover { border-color: var(--accent); }
   .tickbox.on { background: var(--accent); border-color: var(--accent); color: #fff; }
   .tickbox.big { width: 30px; height: 30px; flex-basis: 30px; font-size: 18px; border-radius: 8px; }
+  .row-done .nm, .row-done .name, .row-done .qty { text-decoration: line-through; color: #a5a5aa; }
+  .row-done .srcs, .row-done .chip { opacity: .45; }
+  /* .fading is added to the live node (never rendered straight in), so the
+     1s transition actually runs before the item is spliced out. */
+  .fading { opacity: 0 !important; transition: opacity 1s linear; pointer-events: none; }
 
   /* modal shell */
   .backdrop {
@@ -135,15 +151,12 @@
   }
   .toast {
     position: fixed; bottom: 86px; left: 50%; transform: translateX(-50%); z-index: 990;
-    background: #111; color: #fff; padding: 9px 10px 9px 16px; border-radius: 999px;
+    background: #111; color: #fff; padding: 9px 16px; border-radius: 999px;
     font-size: 13px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.25);
-    display: flex; align-items: center; gap: 12px;
   }
-  .toast .btn { background: transparent; border-color: #555; color: #fff; }
-  .toast .btn:hover { background: #333; }
 
   /* --- Variant A: flat merged checklist --- */
-  .a-wrap { max-width: 640px; margin: 0 auto; padding: 24px 20px; }
+  .a-wrap { max-width: 660px; margin: 0 auto; padding: 24px 20px; }
   .a-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
   .a-add { display: flex; gap: 8px; margin-bottom: 12px; }
   .a-list { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
@@ -152,18 +165,11 @@
   .a-row .body { flex: 1; min-width: 0; }
   .a-row .name { font-weight: 600; }
   .a-row .srcs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
-  .a-row.done .name, .a-row.done .qty { text-decoration: line-through; color: #a5a5aa; }
-  .a-row.done .srcs { opacity: .45; }
-  .a-sechd {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 9px 14px; background: var(--bg); border-bottom: 1px solid var(--line);
-    font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
-  }
   .a-x { color: #b6b6bb; border: none; background: none; font-size: 15px; padding: 0 2px; }
   .a-x:hover { color: var(--discount); }
 
-  /* --- Variant B: grouped by Suggestion, tick removes --- */
-  .b-wrap { max-width: 760px; margin: 0 auto; padding: 24px 20px; }
+  /* --- Variant B: grouped by Suggestion --- */
+  .b-wrap { max-width: 780px; margin: 0 auto; padding: 24px 20px; }
   .b-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 16px; }
   .b-group { border: 1px solid var(--line); border-radius: 12px; background: var(--card); margin-bottom: 12px; overflow: hidden; }
   .b-ghd {
@@ -178,9 +184,8 @@
   .b-items { padding: 4px 0 6px; }
   .b-row { display: flex; align-items: center; gap: 11px; padding: 9px 16px; }
   .b-row .name { flex: 1; }
-  .b-row.leaving { opacity: 0; transform: translateX(26px); transition: all .18s ease-in; }
   .b-progress { height: 3px; background: #eeeef0; }
-  .b-progress > i { display: block; height: 100%; background: var(--accent); transition: width .2s; }
+  .b-progress > i { display: block; height: 100%; background: var(--accent); transition: width .25s; }
 
   /* --- Variant C: aisle board + detail pane + shop mode --- */
   .c-top {
@@ -189,7 +194,7 @@
   }
   .c-top .grow { flex: 1; }
   .c-split { display: flex; align-items: flex-start; gap: 18px; padding: 18px 20px; }
-  .c-board { flex: 1; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+  .c-board { flex: 1; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; align-items: start; }
   .c-aisle { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
   .c-aisle .hd {
     padding: 9px 13px; font-size: 12px; font-weight: 700; text-transform: uppercase;
@@ -201,19 +206,19 @@
   .c-item:hover { background: #fafafb; }
   .c-item.sel { background: var(--accent-soft); }
   .c-item .name { flex: 1; }
-  .c-item.done .name, .c-item.done .qty { text-decoration: line-through; color: #a5a5aa; }
   .c-pane {
-    width: 310px; flex: 0 0 310px; position: sticky; top: 74px;
+    width: 320px; flex: 0 0 320px; position: sticky; top: 74px;
     background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px;
   }
   .c-pane .k { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; margin-top: 14px; }
   .c-trace { border-left: 2px solid var(--line); margin-top: 8px; padding-left: 12px; }
   .c-trace .node { margin-bottom: 10px; font-size: 12.5px; }
-  .c-trace .node b { display: block; font-size: 13px; }
+  .c-trace .node b { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+  .c-trace .node b em { font-style: normal; font-variant-numeric: tabular-nums; color: var(--accent); }
   .c-trace .node span { color: var(--muted); }
   .c-menu {
     position: absolute; right: 20px; top: 52px; background: var(--card); border: 1px solid var(--line);
-    border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.16); z-index: 60; min-width: 230px; overflow: hidden;
+    border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.16); z-index: 60; min-width: 240px; overflow: hidden;
   }
   .c-menu button {
     display: block; width: 100%; text-align: left; background: none; border: none;
@@ -230,9 +235,9 @@
   }
   .shopmode .aisle { padding: 16px 18px 4px; font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: #8b8b95; font-weight: 700; }
   .shopmode .row { display: flex; align-items: center; gap: 14px; padding: 15px 18px; border-bottom: 1px solid #1e1e24; font-size: 17px; }
-  .shopmode .row.done .nm, .shopmode .row.done .q { text-decoration: line-through; color: #5c5c66; }
   .shopmode .row .nm { flex: 1; }
-  .shopmode .row .q { color: #9a9aa4; font-size: 14px; }
+  .shopmode .row .q { color: #9a9aa4; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .shopmode .row.row-done .nm, .shopmode .row.row-done .q { color: #5c5c66; }
   .shopmode .tickbox { background: #101014; border-color: #4a4a55; }
   .shopmode .tickbox.on { background: #45a06e; border-color: #45a06e; }
 
@@ -267,19 +272,19 @@
 
 <script>
 /* ------------------------------------------------------------------ *
+ * Settled behaviour                                                   *
+ * ------------------------------------------------------------------ */
+const TICK_DWELL_MS = 3000;  // struck through, still there, still un-tickable
+const TICK_FADE_MS  = 1000;  // then fades out and is gone
+
+/* ------------------------------------------------------------------ *
  * Seed data                                                          *
  *                                                                    *
- * The ShoppingList is household-wide and persistent: it accumulates   *
- * across PlanningRuns and Profiles, and is only emptied by ticking    *
- * things off. So the seed deliberately mixes:                         *
- *   - items from two different runs, by two different Profiles        *
- *   - an ingredient that two Suggestions both need (Onions, Garlic)   *
- *   - a Suggestion from a known Dish and one the LLM invented         *
- *   - a hand-added item with no Suggestion behind it at all           *
- *   - a couple already ticked, so "what happens to ticked items" is   *
- *     visible on load in every variant                                *
+ * Household-wide and persistent, so it deliberately mixes two runs,   *
+ * two Profiles, a known Dish vs. an LLM-invented one, ingredients     *
+ * several dishes all want (potatoes, onions, garlic, milk, tomatoes)  *
+ * and hand-added items with no dish behind them.                      *
  * ------------------------------------------------------------------ */
-
 const SOURCES = {
   s1: { suggestion: "Chili con carne", dish: "Chili con carne", kind: "known",
         run: "run_0142", runLabel: "Mon 18 Aug · week plan", day: "Monday", profile: "Andreas" },
@@ -289,57 +294,61 @@ const SOURCES = {
         run: "run_0142", runLabel: "Mon 18 Aug · week plan", day: "Thursday", profile: "Andreas" },
   s4: { suggestion: "Pancakes", dish: "Pancakes", kind: "known",
         run: "run_0139", runLabel: "Sat 16 Aug · weekend plan", day: "Sunday", profile: "Maria" },
+  s5: { suggestion: "Frikadeller", dish: "Frikadeller", kind: "known",
+        run: "run_0142", runLabel: "Mon 18 Aug · week plan", day: "Tuesday", profile: "Andreas" },
 };
 
 let uid = 100;
-function item(name, qty, aisle, srcIds, ticked, manualNote) {
+/* needs: [[sourceId, "500 g"], ...] — one entry per dish that wants this ingredient */
+function item(name, aisle, needs, manualNote, manualQty) {
   return {
-    id: "i" + (++uid), name, qty, aisle,
-    sources: srcIds.map(id => ({ id, ...SOURCES[id] })),
+    id: "i" + (++uid), name, aisle,
+    sources: needs.map(pair => Object.assign({ id: pair[0], qty: pair[1] }, SOURCES[pair[0]])),
+    manualQty: manualQty || "",
     manualNote: manualNote || null,
-    ticked: !!ticked,
-    addedAt: srcIds.length ? SOURCES[srcIds[0]].runLabel : "added by hand",
-    addedBy: srcIds.length ? SOURCES[srcIds[0]].profile : "Andreas",
+    ticked: false,
+    addedAt: needs.length ? SOURCES[needs[0][0]].runLabel : "added by hand",
+    addedBy: needs.length ? SOURCES[needs[0][0]].profile : "Andreas",
   };
 }
 
 const state = {
   profile: "Andreas",
   list: [
-    item("Minced beef", "500 g", "Meat & fish", ["s1"]),
-    item("Kidney beans", "2 tins", "Pantry", ["s1"]),
-    item("Chopped tomatoes", "3 tins", "Pantry", ["s1", "s2"]),
-    item("Onions", "4", "Produce", ["s1", "s2"]),
-    item("Garlic", "1 bulb", "Produce", ["s1", "s2", "s3"]),
-    item("Lasagne sheets", "1 pack", "Pantry", ["s2"]),
-    item("Mozzarella", "200 g", "Dairy", ["s2"], true),
-    item("Salmon fillets", "2", "Meat & fish", ["s3"]),
-    item("White miso paste", "1 jar", "Pantry", ["s3"]),
-    item("Pak choi", "2 heads", "Produce", ["s3"]),
-    item("Sesame seeds", "1 bag", "Pantry", ["s3"], true),
-    item("Flour", "1 kg", "Pantry", ["s4"]),
-    item("Eggs", "12", "Dairy", ["s4"]),
-    item("Milk", "1 L", "Dairy", ["s2", "s4"]),
-    item("Coffee", "500 g", "Pantry", [], false, "not for a dish — we're out"),
-    item("Dish soap", "1", "Other", [], true, "not for a dish"),
+    item("Potatoes",          "Produce",     [["s5", "800 g"], ["s3", "400 g"]]),
+    item("Onions",            "Produce",     [["s1", "2"], ["s2", "2"], ["s5", "1"]]),
+    item("Garlic",            "Produce",     [["s1", "2 cloves"], ["s2", "3 cloves"], ["s3", "1 cloves"]]),
+    item("Pak choi",          "Produce",     [["s3", "2 heads"]]),
+    item("Minced beef",       "Meat & fish", [["s1", "500 g"]]),
+    item("Minced pork",       "Meat & fish", [["s5", "500 g"]]),
+    item("Salmon fillets",    "Meat & fish", [["s3", "2"]]),
+    item("Milk",              "Dairy",       [["s2", "5 dl"], ["s4", "3 dl"], ["s5", "1 dl"]]),
+    item("Eggs",              "Dairy",       [["s4", "3"], ["s5", "1"]]),
+    item("Mozzarella",        "Dairy",       [["s2", "200 g"]]),
+    item("Chopped tomatoes",  "Pantry",      [["s1", "2 tins"], ["s2", "1 tins"]]),
+    item("Kidney beans",      "Pantry",      [["s1", "2 tins"]]),
+    item("Lasagne sheets",    "Pantry",      [["s2", "1 pack"]]),
+    item("White miso paste",  "Pantry",      [["s3", "1 jar"]]),
+    item("Sesame seeds",      "Pantry",      [["s3", "1 bag"]]),
+    item("Flour",             "Pantry",      [["s4", "300 g"], ["s5", "50 g"]]),
+    item("Coffee",            "Pantry",      [], "we're just out", "500 g"),
+    item("Dish soap",         "Other",       [], "nothing to do with dinner", ""),
   ],
   ui: {
-    showTicked: true,          // A
-    openGroups: { s1: true, s2: true, s3: false, s4: false }, // B
-    selectedId: null,          // C
-    exportOpen: false,         // C menu
-    shopMode: false,           // C
-    modal: null,               // { kind: "export"|"share", scope }
+    openGroups: { s1: true, s2: true, s3: false, s4: false, s5: false }, // B
+    selectedId: null,   // C
+    exportOpen: false,  // C menu
+    shopMode: false,    // C
+    modal: null,
     draft: "",
   },
   toast: null,
-  undo: null,
 };
 
 const AISLES = ["Produce", "Meat & fish", "Dairy", "Pantry", "Frozen", "Other"];
 
-/* Variant B deletes items as they're ticked, so "3 of 5 bought" needs the
-   original count captured up front. */
+/* Variant B shows "n of m bought", and bought items are gone by then, so the
+   original count has to be captured up front. */
 const ORIGINAL_COUNT = {};
 Object.keys(SOURCES).forEach(sid => {
   ORIGINAL_COUNT[sid] = state.list.filter(i => i.sources.some(s => s.id === sid)).length;
@@ -347,51 +356,101 @@ Object.keys(SOURCES).forEach(sid => {
 ORIGINAL_COUNT.manual = state.list.filter(i => !i.sources.length).length;
 
 /* ------------------------------------------------------------------ *
+ * Quantities                                                          *
+ *                                                                     *
+ * The headline amount is the sum over every dish that wants it; each   *
+ * dish's share then shows as a bare number, because the unit is        *
+ * already stated once on the total. Units that don't match can't be    *
+ * summed, so those fall back to joining, and each dish keeps its unit. *
+ * ------------------------------------------------------------------ */
+function parseQty(q) {
+  const m = String(q || "").trim().match(/^([\d.,]+)\s*(.*)$/);
+  if (!m) return null;
+  return { n: parseFloat(m[1].replace(",", ".")), unit: m[2].trim() };
+}
+function fmtNum(n) {
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+}
+/* All dishes asking in the same unit? Then the numbers are comparable. */
+function unified(it) {
+  const parsed = it.sources.map(s => parseQty(s.qty));
+  if (!parsed.length || parsed.some(p => !p)) return null;
+  const unit = parsed[0].unit;
+  if (parsed.some(p => p.unit !== unit)) return null;
+  return { unit: unit, parsed: parsed };
+}
+function totalQty(it) {
+  if (!it.sources.length) return it.manualQty || "";
+  const u = unified(it);
+  if (!u) return it.sources.map(s => s.qty).join(" + ");
+  const sum = u.parsed.reduce((a, p) => a + p.n, 0);
+  return fmtNum(sum) + (u.unit ? " " + u.unit : "");
+}
+/* One dish's share: bare number when it's comparable to the total, else the
+   full amount with its own unit. */
+function shareOf(it, src) {
+  const u = unified(it);
+  if (!u) return src.qty;
+  return fmtNum(parseQty(src.qty).n);
+}
+/* Only worth breaking down when more than one dish wants the thing. */
+function isShared(it) { return it.sources.length > 1; }
+
+/* ------------------------------------------------------------------ *
  * Shared helpers                                                      *
  * ------------------------------------------------------------------ */
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
-function open$(id) { return state.list.find(i => i.id === id); }
+function byId(id) { return state.list.find(i => i.id === id); }
 function openItems() { return state.list.filter(i => !i.ticked); }
-function tickedItems() { return state.list.filter(i => i.ticked); }
 
-function toggleTick(id) {
-  const it = open$(id);
-  it.ticked = !it.ticked;
-  render();
+/* --- the settled tick behaviour, used by every variant --- */
+const tickTimers = {};   // id -> [dwellTimer] then [dwellTimer, fadeTimer]
+function cancelTimers(id) {
+  (tickTimers[id] || []).forEach(clearTimeout);
+  delete tickTimers[id];
 }
-/* Variant B only: ticking deletes the item outright, with an undo window. */
-function tickAndRemove(id) {
-  const idx = state.list.findIndex(i => i.id === id);
-  const removed = state.list[idx];
-  const row = document.querySelector('[data-row="' + id + '"]');
-  const commit = () => {
-    state.list.splice(idx, 1);
-    state.undo = { item: removed, idx };
-    flash("“" + removed.name + "” bought", "Undo", () => {
-      state.list.splice(state.undo.idx, 0, state.undo.item);
-      state.undo = null;
-      render();
-    });
+function markFading(id) {
+  const nodes = document.querySelectorAll('[data-row="' + id + '"]');
+  for (let i = 0; i < nodes.length; i++) nodes[i].classList.add("fading");
+}
+function toggleTick(id) {
+  const it = byId(id);
+  if (!it) return;
+  if (it.ticked) {
+    // Un-ticked inside the dwell window: it stays. This is the undo.
+    it.ticked = false;
+    cancelTimers(id);
     render();
-  };
-  if (row) { row.classList.add("leaving"); setTimeout(commit, 170); } else commit();
+    return;
+  }
+  it.ticked = true;
+  render();
+  const dwell = setTimeout(() => {
+    // Add .fading to the LIVE node so the 1s transition actually runs —
+    // rendering it with the class already on would jump straight to 0.
+    markFading(id);
+    const fade = setTimeout(() => {
+      state.list = state.list.filter(x => x.id !== id);
+      if (state.ui.selectedId === id) state.ui.selectedId = null;
+      cancelTimers(id);
+      render();
+    }, TICK_FADE_MS);
+    tickTimers[id] = [dwell, fade];
+  }, TICK_DWELL_MS);
+  tickTimers[id] = [dwell];
 }
 function removeItem(id) {
+  cancelTimers(id);
   state.list = state.list.filter(i => i.id !== id);
-  render();
-}
-function clearTicked() {
-  const n = tickedItems().length;
-  state.list = openItems();
-  flash(n + " ticked item" + (n === 1 ? "" : "s") + " cleared");
+  if (state.ui.selectedId === id) state.ui.selectedId = null;
   render();
 }
 function addManual() {
   const v = (state.ui.draft || "").trim();
   if (!v) return;
-  state.list.push(item(v, "", "Other", [], false, "added by hand"));
+  state.list.push(item(v, "Other", [], "added by hand", ""));
   state.ui.draft = "";
   render();
   const el = document.getElementById("manualinput");
@@ -399,57 +458,60 @@ function addManual() {
 }
 
 let toastTimer = null;
-function flash(msg, actionLabel, action) {
-  state.toast = { msg, actionLabel, action };
+function flash(msg) {
+  state.toast = msg;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { state.toast = null; render(); }, 4200);
+  toastTimer = setTimeout(() => { state.toast = null; render(); }, 3000);
 }
-window.__undoAction = null;
 function toastHTML() {
-  if (!state.toast) return "";
-  window.__undoAction = state.toast.action || null;
-  const btn = state.toast.actionLabel
-    ? '<button class="btn sm" onclick="(window.__undoAction||function(){})();state.toast=null;render()">'
-      + esc(state.toast.actionLabel) + "</button>"
-    : "";
-  return '<div class="toast">' + esc(state.toast.msg) + btn + "</div>";
+  return state.toast ? '<div class="toast">' + esc(state.toast) + "</div>" : "";
 }
 
 /* --- export text: the thing you actually take to the shop --- */
 function exportText(opts) {
   opts = opts || {};
   const items = opts.items || openItems();
+  const line = i => {
+    const share = isShared(i)
+      ? "   (" + i.sources.map(s => s.suggestion + " " + shareOf(i, s)).join(", ") + ")"
+      : "";
+    return "[ ] " + i.name + (totalQty(i) ? " — " + totalQty(i) : "") + share;
+  };
   const lines = ["Shopping list — Food Planner", ""];
   if (opts.byAisle) {
     AISLES.forEach(a => {
       const rows = items.filter(i => i.aisle === a);
       if (!rows.length) return;
       lines.push(a.toUpperCase());
-      rows.forEach(i => lines.push("  [ ] " + i.name + (i.qty ? " — " + i.qty : "")));
+      rows.forEach(i => lines.push("  " + line(i)));
       lines.push("");
     });
   } else {
-    items.forEach(i => lines.push("[ ] " + i.name + (i.qty ? " — " + i.qty : "")));
+    items.forEach(i => lines.push(line(i)));
     lines.push("");
   }
   if (opts.withSources) {
-    lines.push("For: " + [...new Set(items.flatMap(i => i.sources.map(s => s.suggestion)))].join(", "));
+    const names = [];
+    items.forEach(i => i.sources.forEach(s => {
+      if (names.indexOf(s.suggestion) === -1) names.push(s.suggestion);
+    }));
+    lines.push("For: " + names.join(", "));
   }
   return lines.join("\n");
 }
 function copyExport(text) {
-  navigator.clipboard && navigator.clipboard.writeText(text);
+  if (navigator.clipboard) navigator.clipboard.writeText(text);
   flash("Copied to clipboard");
   state.ui.modal = null;
   render();
 }
 function nativeShare(text) {
   if (navigator.share) {
-    navigator.share({ title: "Shopping list", text }).catch(() => {});
+    navigator.share({ title: "Shopping list", text: text }).catch(() => {});
     flash("Share sheet opened");
   } else {
-    flash("navigator.share unavailable here — falling back to copy");
-    navigator.clipboard && navigator.clipboard.writeText(text);
+    if (navigator.clipboard) navigator.clipboard.writeText(text);
+    flash("navigator.share unavailable here — copied instead");
   }
   state.ui.modal = null;
   state.ui.exportOpen = false;
@@ -462,88 +524,73 @@ function header(sub) {
     + '<nav><span>Dish Library</span><span>Plan a Week</span><span>Settings</span>'
     + '<span class="on">Shopping List</span></nav></header>';
 }
-
-function sourceChip(s) {
+function manualAdder() {
+  return '<div class="a-add"><input id="manualinput" type="text" placeholder="Add something not from a dish…" '
+    + 'value="' + esc(state.ui.draft) + '" oninput="state.ui.draft=this.value" '
+    + "onkeydown=\"if(event.key==='Enter')addManual()\">"
+    + '<button class="btn" onclick="addManual()">Add</button></div>';
+}
+/* Source chip carrying that dish's share as a bare number. */
+function sourceChip(it, s) {
   const cls = s.kind === "known" ? "known" : "unknown";
-  return '<span class="chip ' + cls + '">' + (s.kind === "known" ? "🍽" : "✨") + " " + esc(s.suggestion) + "</span>";
+  return '<span class="chip ' + cls + '">' + (s.kind === "known" ? "🍽" : "✨") + " " + esc(s.suggestion)
+    + (isShared(it) ? ' <span class="n">' + esc(shareOf(it, s)) + "</span>" : "")
+    + "</span>";
 }
 
 /* ------------------------------------------------------------------ *
  * VARIANT A — flat merged checklist                                   *
  *                                                                     *
- * One column, one row per ingredient, whatever it came from. Sources   *
- * ride along as small muted chips under the name — provenance is       *
- * present but never the organising principle. Ticking strikes the row  *
- * out and sinks it into a "Ticked" section at the bottom; nothing      *
- * leaves the list until you press "Clear ticked". Export is a single   *
- * plain-text copy.                                                     *
+ * One column, one row per ingredient no matter how many dishes want    *
+ * it. The headline amount is the sum; each source chip carries that    *
+ * dish's bare number. Provenance is present but never the organising   *
+ * principle. Export is a single plain-text copy.                       *
  * ------------------------------------------------------------------ */
 function VariantA() {
-  const open = openItems(), done = tickedItems();
-  const rows = its => its.map(i => {
+  const rows = state.list.map(i => {
     const srcs = i.sources.length
-      ? i.sources.map(sourceChip).join("")
-      : '<span class="chip manual">✎ added by hand</span>';
-    return '<div class="a-row ' + (i.ticked ? "done" : "") + '">'
+      ? i.sources.map(s => sourceChip(i, s)).join("")
+      : '<span class="chip manual">✎ ' + esc(i.manualNote || "added by hand") + "</span>";
+    return '<div class="a-row ' + (i.ticked ? "row-done" : "") + '" data-row="' + i.id + '">'
       + '<div class="tickbox ' + (i.ticked ? "on" : "") + '" onclick="toggleTick(\'' + i.id + '\')">✓</div>'
       + '<div class="body"><div class="name">' + esc(i.name)
-      + (i.qty ? ' <span class="qty">· ' + esc(i.qty) + "</span>" : "")
+      + (totalQty(i) ? ' <span class="qty">· ' + esc(totalQty(i)) + "</span>" : "")
       + '</div><div class="srcs">' + srcs + "</div></div>"
-      + '<button class="a-x" title="Remove" onclick="removeItem(\'' + i.id + '\')">✕</button>'
+      + '<button class="a-x" title="Remove without buying" onclick="removeItem(\'' + i.id + '\')">✕</button>'
       + "</div>";
   }).join("");
 
   return header("Shopping List · shared by the whole household")
     + '<div class="a-wrap">'
     + '<div class="a-bar"><div><h1>Shopping list</h1>'
-    + '<div class="sub">' + open.length + " to buy · " + done.length + " ticked</div></div>"
-    + '<button class="btn primary" onclick="state.ui.modal={kind:\'export\'};render()">Copy list</button></div>'
-
-    + '<div class="a-add"><input id="manualinput" type="text" placeholder="Add something not from a dish…" '
-    + 'value="' + esc(state.ui.draft) + '" oninput="state.ui.draft=this.value" '
-    + 'onkeydown="if(event.key===\'Enter\')addManual()">'
-    + '<button class="btn" onclick="addManual()">Add</button></div>'
-
+    + '<div class="sub">' + openItems().length + " to buy · amounts are the total across every dish</div></div>"
+    + "<button class=\"btn primary\" onclick=\"state.ui.modal={by:false};render()\">Copy list</button></div>"
+    + manualAdder()
     + '<div class="a-list">'
-    + (open.length ? rows(open) : '<div class="empty">Nothing left to buy. 🎉</div>')
-    + (done.length
-        ? '<div class="a-sechd"><span>Ticked · ' + done.length + "</span>"
-          + '<button class="btn sm danger" onclick="clearTicked()">Clear ticked</button></div>'
-          + (state.ui.showTicked ? rows(done) : "")
-        : "")
+    + (state.list.length ? rows : '<div class="empty">Nothing left to buy. 🎉</div>')
     + "</div>"
-    + '<div class="sub" style="margin-top:12px">Ticked items stay struck through until you clear them, '
-    + "so you can un-tick a mistake at the till.</div>"
+    + '<div class="sub" style="margin-top:12px">Tick an item and it stays struck through for a moment '
+    + "before fading away — un-tick inside that window if you grabbed the wrong thing.</div>"
     + "</div>"
-    + (state.ui.modal ? exportModalA() : "")
+    + (state.ui.modal ? exportModal(false, "Take this to the shop") : "")
     + toastHTML();
-}
-function exportModalA() {
-  const text = exportText({});
-  return '<div class="backdrop" onclick="if(event.target===this){state.ui.modal=null;render()}">'
-    + '<div class="modal"><h2>Take this to the shop</h2>'
-    + '<div class="sub">Plain text — paste it anywhere. Only unticked items are included.</div>'
-    + '<textarea class="exportpre" readonly>' + esc(text) + "</textarea>"
-    + '<div class="acts"><button class="btn" onclick="state.ui.modal=null;render()">Close</button>'
-    + '<button class="btn primary" onclick="copyExport(' + JSON.stringify(text).replace(/"/g, "&quot;") + ')">Copy</button>'
-    + "</div></div></div>";
 }
 
 /* ------------------------------------------------------------------ *
- * VARIANT B — grouped by Suggestion, ticking removes                  *
+ * VARIANT B — grouped by Suggestion                                   *
  *                                                                     *
- * The list is organised by what you're cooking: one collapsible group  *
- * per Suggestion, so provenance is the structure rather than a label.  *
- * Ticking removes the item on the spot (undo toast); a group vanishes  *
- * once it's empty, which doubles as "that dish is fully bought".       *
- * Export uses the native share sheet, per group or for everything.     *
+ * Organised by what you're cooking: one collapsible group per          *
+ * Suggestion, so provenance is the structure rather than a label. An   *
+ * ingredient two dishes want appears under both, each row showing that *
+ * dish's own amount and naming the others. Export is the native share  *
+ * sheet, per group or for everything.                                  *
  * ------------------------------------------------------------------ */
 function VariantB() {
-  // Same ingredient needed by two dishes shows up under both.
-  const groups = Object.keys(SOURCES).map(sid => ({
-    sid, ...SOURCES[sid],
-    items: state.list.filter(i => i.sources.some(s => s.id === sid)),
-  })).filter(g => g.items.length);
+  const groups = Object.keys(SOURCES).map(sid => {
+    const g = Object.assign({ sid: sid }, SOURCES[sid]);
+    g.items = state.list.filter(i => i.sources.some(s => s.id === sid));
+    return g;
+  }).filter(g => g.items.length);
 
   const manual = state.list.filter(i => !i.sources.length);
   if (manual.length) {
@@ -552,75 +599,76 @@ function VariantB() {
   }
 
   const groupHTML = g => {
-    const open = state.ui.openGroups[g.sid];
-    const total = g.items.length;
+    const isOpen = state.ui.openGroups[g.sid];
+    const left = g.items.filter(i => !i.ticked).length;
+    const orig = Math.max(ORIGINAL_COUNT[g.sid] || g.items.length, g.items.length);
+    const bought = orig - left;
     const chip = g.kind === "manual"
       ? '<span class="chip manual">✎ by hand</span>'
       : (g.kind === "known"
           ? '<span class="chip known">🍽 from your library</span>'
           : '<span class="chip unknown">✨ new to you</span>');
-    const orig = Math.max(ORIGINAL_COUNT[g.sid] || total, total);
-    const bought = orig - total;
-    return '<div class="b-group ' + (open ? "open" : "") + '">'
-      + '<div class="b-ghd" onclick="state.ui.openGroups[\'' + g.sid + '\']=!state.ui.openGroups[\'' + g.sid + '\'];render()">'
-      + '<span class="caret">' + (open ? "▾" : "▸") + "</span>"
+    return '<div class="b-group ' + (isOpen ? "open" : "") + '">'
+      + "<div class=\"b-ghd\" onclick=\"state.ui.openGroups['" + g.sid + "']=!state.ui.openGroups['" + g.sid + "'];render()\">"
+      + '<span class="caret">' + (isOpen ? "▾" : "▸") + "</span>"
       + '<div><div class="t">' + esc(g.suggestion) + "</div>"
       + '<div class="sub" style="font-size:12px">' + (g.day ? esc(g.day) + " · " : "")
       + (g.profile ? "planned by " + esc(g.profile) : "added by you") + "</div></div>"
       + '<div class="meta">' + chip
       + '<span class="b-count">' + bought + " of " + orig + " bought</span>"
-      + '<button class="btn sm" onclick="event.stopPropagation();shareGroup(\'' + g.sid + '\')">Share</button></div></div>'
+      + "<button class=\"btn sm\" onclick=\"event.stopPropagation();shareGroup('" + g.sid + "')\">Share</button></div></div>"
       + '<div class="b-progress"><i style="width:' + Math.round((bought / orig) * 100) + '%"></i></div>'
-      + (open ? '<div class="b-items">' + g.items.map(i =>
-          '<div class="b-row" data-row="' + i.id + '">'
-          + '<div class="tickbox" onclick="tickAndRemove(\'' + i.id + '\')">✓</div>'
-          + '<div class="name">' + esc(i.name)
-          + (i.qty ? ' <span class="qty">· ' + esc(i.qty) + "</span>" : "")
-          + (i.sources.length > 1
-              ? ' <span class="chip">also for ' + esc(i.sources.filter(s => s.id !== g.sid).map(s => s.suggestion).join(", ")) + "</span>"
-              : "")
-          + "</div>"
-          + '<button class="a-x" title="Remove without buying" onclick="removeItem(\'' + i.id + '\')">✕</button>'
-          + "</div>").join("") + "</div>"
-        : "")
+      + (isOpen ? '<div class="b-items">' + g.items.map(i => {
+          const mine = i.sources.filter(s => s.id === g.sid)[0];
+          const others = i.sources.filter(s => s.id !== g.sid);
+          return '<div class="b-row ' + (i.ticked ? "row-done" : "") + '" data-row="' + i.id + '">'
+            + '<div class="tickbox ' + (i.ticked ? "on" : "") + '" onclick="toggleTick(\'' + i.id + '\')">✓</div>'
+            + '<div class="name">' + esc(i.name)
+            + (mine ? ' <span class="qty">· ' + esc(mine.qty) + "</span>"
+                    : (i.manualQty ? ' <span class="qty">· ' + esc(i.manualQty) + "</span>" : ""))
+            + (others.length
+                ? ' <span class="chip">also for ' + esc(others.map(s => s.suggestion + " " + shareOf(i, s)).join(", "))
+                  + " · buy " + esc(totalQty(i)) + "</span>"
+                : "")
+            + "</div>"
+            + '<button class="a-x" title="Remove without buying" onclick="removeItem(\'' + i.id + '\')">✕</button>'
+            + "</div>";
+        }).join("") + "</div>" : "")
       + "</div>";
   };
 
   return header("Shopping List · shared by the whole household")
     + '<div class="b-wrap">'
     + '<div class="b-bar"><div><h1>Shopping list</h1>'
-    + '<div class="sub">' + state.list.length + " items across " + groups.length + " dishes · ticking an item buys it and removes it</div></div>"
+    + '<div class="sub">' + openItems().length + " to buy across " + groups.length
+    + " dishes · each row shows that dish's share, shared rows say what to actually buy</div></div>"
     + '<button class="btn primary" onclick="shareAll()">Share list</button></div>'
-    + '<div class="a-add"><input id="manualinput" type="text" placeholder="Add something not from a dish…" '
-    + 'value="' + esc(state.ui.draft) + '" oninput="state.ui.draft=this.value" '
-    + 'onkeydown="if(event.key===\'Enter\')addManual()">'
-    + '<button class="btn" onclick="addManual()">Add</button></div>'
+    + manualAdder()
     + (groups.length ? groups.map(groupHTML).join("") : '<div class="card empty">Nothing to buy. 🎉</div>')
     + "</div>"
     + toastHTML();
 }
 function shareGroup(sid) {
   const items = sid === "manual"
-    ? state.list.filter(i => !i.sources.length)
-    : state.list.filter(i => i.sources.some(s => s.id === sid));
-  nativeShare(exportText({ items }));
+    ? state.list.filter(i => !i.sources.length && !i.ticked)
+    : state.list.filter(i => !i.ticked && i.sources.some(s => s.id === sid));
+  nativeShare(exportText({ items: items }));
 }
 function shareAll() { nativeShare(exportText({ withSources: true })); }
 
 /* ------------------------------------------------------------------ *
  * VARIANT C — aisle board + detail pane + shop mode                   *
  *                                                                     *
- * Items are grouped the way a shop is laid out, not the way they were  *
- * planned. Provenance moves out of the row entirely into a detail pane *
- * (the full chain: Suggestion → Dish → PlanningRun → Profile), so the  *
- * rows stay dense. Ticking strikes through in place; "Clear ticked"    *
- * empties them. Export offers copy AND share behind one menu — and     *
- * "Shop mode" is the argument that you may not need to export at all.  *
+ * Items grouped the way a shop is laid out, not the way they were      *
+ * planned, so rows stay dense — just name and total. Provenance moves  *
+ * out of the row entirely into a detail pane holding the full chain    *
+ * (Suggestion → Dish → run → Profile) with each dish's share beside    *
+ * it. Export offers copy AND share behind one menu, and "Shop mode" is *
+ * the argument that you may not need to export at all.                 *
  * ------------------------------------------------------------------ */
 function VariantC() {
   if (state.ui.shopMode) return shopModeHTML();
-  const sel = state.ui.selectedId ? open$(state.ui.selectedId) : null;
-  const done = tickedItems().length;
+  const sel = state.ui.selectedId ? byId(state.ui.selectedId) : null;
 
   const board = AISLES.map(a => {
     const rows = state.list.filter(i => i.aisle === a);
@@ -628,43 +676,40 @@ function VariantC() {
     const left = rows.filter(i => !i.ticked).length;
     return '<div class="c-aisle"><div class="hd"><span>' + esc(a) + "</span><span>" + left + " left</span></div>"
       + rows.map(i =>
-          '<div class="c-item ' + (i.ticked ? "done " : "") + (sel && sel.id === i.id ? "sel" : "")
-          + '" onclick="state.ui.selectedId=\'' + i.id + '\';render()">'
+          '<div class="c-item ' + (i.ticked ? "row-done " : "") + (sel && sel.id === i.id ? "sel" : "")
+          + '" data-row="' + i.id + "\" onclick=\"state.ui.selectedId='" + i.id + "';render()\">"
           + '<div class="tickbox ' + (i.ticked ? "on" : "") + '" onclick="event.stopPropagation();toggleTick(\'' + i.id + '\')">✓</div>'
           + '<div class="name">' + esc(i.name) + "</div>"
-          + (i.qty ? '<div class="qty">' + esc(i.qty) + "</div>" : "")
-          + (i.sources.length > 1 ? '<span class="chip">×' + i.sources.length + "</span>" : "")
+          + (totalQty(i) ? '<div class="qty">' + esc(totalQty(i)) + "</div>" : "")
+          + (isShared(i) ? '<span class="chip">' + i.sources.length + " dishes</span>" : "")
           + "</div>").join("")
       + "</div>";
   }).join("");
 
   return header("Shopping List · shared by the whole household")
     + '<div class="c-top">'
-    + "<div><b>Shopping list</b> <span class=\"sub\">· " + openItems().length + " to buy</span></div>"
+    + '<div><b>Shopping list</b> <span class="sub">· ' + openItems().length + " to buy</span></div>"
     + '<div class="grow"></div>'
-    + (done ? '<button class="btn sm danger" onclick="clearTicked()">Clear ticked (' + done + ")</button>" : "")
     + '<button class="btn sm" onclick="state.ui.exportOpen=!state.ui.exportOpen;render()">Export ▾</button>'
     + '<button class="btn sm primary" onclick="state.ui.shopMode=true;state.ui.exportOpen=false;render()">Shop mode</button>'
     + "</div>"
     + (state.ui.exportOpen ? exportMenuC() : "")
     + '<div class="c-split"><div class="c-board">' + board + "</div>"
     + '<div class="c-pane">' + (sel ? paneHTML(sel) : panePlaceholder()) + "</div></div>"
-    + (state.ui.modal ? exportModalC() : "")
+    + (state.ui.modal ? exportModal(!!state.ui.modal.by, "Export") : "")
     + toastHTML();
 }
 function panePlaceholder() {
   return "<h2>Where did this come from?</h2>"
-    + '<div class="sub">Pick an item to see the Suggestion, Dish and planning run behind it — '
-    + "and who in the household put it on the list.</div>"
-    + '<div class="k">Add by hand</div>'
-    + '<div class="a-add" style="margin-top:8px"><input id="manualinput" type="text" placeholder="e.g. Coffee" '
-    + 'value="' + esc(state.ui.draft) + '" oninput="state.ui.draft=this.value" '
-    + 'onkeydown="if(event.key===\'Enter\')addManual()"></div>';
+    + '<div class="sub">Pick an item to see the Suggestion, Dish and planning run behind it, '
+    + "how much each dish needs, and who in the household put it on the list.</div>"
+    + '<div class="k">Add by hand</div>' + manualAdder();
 }
 function paneHTML(i) {
   const trace = i.sources.length
     ? i.sources.map(s =>
-        '<div class="node"><b>' + esc(s.suggestion) + "</b>"
+        '<div class="node"><b>' + esc(s.suggestion)
+        + "<em>" + esc(isShared(i) ? shareOf(i, s) : s.qty) + "</em></b>"
         + "<span>" + (s.kind === "known"
             ? "known dish · from your library (" + esc(s.dish) + ")"
             : "unknown dish · invented by the LLM")
@@ -673,9 +718,9 @@ function paneHTML(i) {
     : '<div class="node"><b>Added by hand</b><span>' + esc(i.manualNote || "no dish behind this one") + "</span></div>";
   return '<div style="display:flex;align-items:flex-start;gap:10px">'
     + '<div class="tickbox ' + (i.ticked ? "on" : "") + '" onclick="toggleTick(\'' + i.id + '\')">✓</div>'
-    + "<div><h2 style=\"margin:0\">" + esc(i.name) + "</h2>"
-    + '<div class="sub">' + esc(i.qty || "no quantity") + " · " + esc(i.aisle) + "</div></div></div>"
-    + '<div class="k">Needed for ' + (i.sources.length > 1 ? i.sources.length + " dishes" : "") + "</div>"
+    + '<div><h2 style="margin:0">' + esc(i.name) + "</h2>"
+    + '<div class="sub">buy ' + esc(totalQty(i) || "—") + " · " + esc(i.aisle) + "</div></div></div>"
+    + '<div class="k">' + (isShared(i) ? "Split across " + i.sources.length + " dishes" : "Needed for") + "</div>"
     + '<div class="c-trace">' + trace + "</div>"
     + '<div class="k">On the list since</div><div class="sub">' + esc(i.addedAt) + " · " + esc(i.addedBy) + "</div>"
     + '<div style="margin-top:16px;display:flex;gap:8px">'
@@ -683,21 +728,22 @@ function paneHTML(i) {
     + '<button class="btn sm danger" onclick="removeItem(\'' + i.id + '\')">Remove</button></div>';
 }
 function exportMenuC() {
-  const flat = exportText({});
   const byAisle = exportText({ byAisle: true });
   return '<div class="c-menu">'
-    + '<button onclick="state.ui.modal={kind:\'export\',by:false};state.ui.exportOpen=false;render()">Copy as plain text'
+    + "<button onclick=\"state.ui.modal={by:false};state.ui.exportOpen=false;render()\">Copy as plain text"
     + '<span class="d">Flat checklist, unticked items only</span></button>'
-    + '<button onclick="state.ui.modal={kind:\'export\',by:true};state.ui.exportOpen=false;render()">Copy grouped by aisle'
+    + "<button onclick=\"state.ui.modal={by:true};state.ui.exportOpen=false;render()\">Copy grouped by aisle"
     + '<span class="d">Produce, meat, dairy, pantry…</span></button>'
     + '<button onclick="nativeShare(' + JSON.stringify(byAisle).replace(/"/g, "&quot;") + ')">Share…'
     + '<span class="d">Native share sheet (Messages, Notes, WhatsApp)</span></button>'
     + "</div>";
 }
-function exportModalC() {
-  const text = exportText({ byAisle: !!state.ui.modal.by });
+function exportModal(byAisle, title) {
+  const text = exportText({ byAisle: byAisle });
   return '<div class="backdrop" onclick="if(event.target===this){state.ui.modal=null;render()}">'
-    + '<div class="modal"><h2>Export</h2><div class="sub">Only unticked items are included.</div>'
+    + '<div class="modal"><h2>' + esc(title) + "</h2>"
+    + '<div class="sub">Plain text — paste it anywhere. Only unticked items are included; '
+    + "shared ingredients show the total to buy, with each dish's share in brackets.</div>"
     + '<textarea class="exportpre" readonly>' + esc(text) + "</textarea>"
     + '<div class="acts"><button class="btn" onclick="state.ui.modal=null;render()">Close</button>'
     + '<button class="btn" onclick="nativeShare(' + JSON.stringify(text).replace(/"/g, "&quot;") + ')">Share…</button>'
@@ -709,10 +755,11 @@ function shopModeHTML() {
     const rows = state.list.filter(i => i.aisle === a);
     if (!rows.length) return "";
     return '<div class="aisle">' + esc(a) + "</div>"
-      + rows.map(i => '<div class="row ' + (i.ticked ? "done" : "") + '" onclick="toggleTick(\'' + i.id + '\')">'
+      + rows.map(i => '<div class="row ' + (i.ticked ? "row-done" : "") + '" data-row="' + i.id
+          + '" onclick="toggleTick(\'' + i.id + '\')">'
           + '<div class="tickbox big ' + (i.ticked ? "on" : "") + '">✓</div>'
           + '<div class="nm">' + esc(i.name) + "</div>"
-          + '<div class="q">' + esc(i.qty) + "</div></div>").join("");
+          + '<div class="q">' + esc(totalQty(i)) + "</div></div>").join("");
   }).join("");
   return '<div class="shopmode"><div class="hd"><div><b>Shop mode</b>'
     + '<div style="font-size:12px;color:#8b8b95">' + openItems().length + " left · tap a row to tick it off</div></div>"
@@ -724,8 +771,8 @@ function shopModeHTML() {
  * Switcher + render                                                   *
  * ------------------------------------------------------------------ */
 const VARIANTS = {
-  A: { name: "Flat checklist · clear ticked", fn: VariantA },
-  B: { name: "Grouped by dish · tick removes", fn: VariantB },
+  A: { name: "Flat merged checklist", fn: VariantA },
+  B: { name: "Grouped by dish", fn: VariantB },
   C: { name: "Aisle board · detail pane · shop mode", fn: VariantC },
 };
 const keys = Object.keys(VARIANTS);
@@ -739,9 +786,6 @@ function setVariant(v) {
   state.ui.modal = null; state.ui.selectedId = null;
   state.ui.exportOpen = false; state.ui.shopMode = false;
   state.toast = null;
-  // B has no "ticked but still here" state at all — anything ticked in A or C
-  // would already be gone in B's model, so drop it on the way in.
-  if (v === "B") state.list = state.list.filter(i => !i.ticked);
   render();
 }
 function cycle(step) {
@@ -764,6 +808,10 @@ function toggleState() {
 function render() {
   const v = currentVariant();
   document.getElementById("root").innerHTML = VARIANTS[v].fn();
+  // A row already mid-fade must keep fading across a re-render.
+  Object.keys(tickTimers).forEach(id => {
+    if ((tickTimers[id] || []).length > 1) markFading(id);
+  });
   document.getElementById("switcher").innerHTML =
     '<button onclick="cycle(-1)">‹</button>'
     + '<div class="lbl"><div class="tag">prototype variant</div>' + v + " — " + VARIANTS[v].name + "</div>"
@@ -771,18 +819,18 @@ function render() {
   document.getElementById("statejson").textContent = JSON.stringify({
     variant: v,
     profile: state.profile,
-    totalItems: state.list.length,
+    ticking: "strike through -> " + (TICK_DWELL_MS / 1000) + "s dwell -> " + (TICK_FADE_MS / 1000) + "s fade -> gone",
+    tickedAwaitingFade: state.list.filter(i => i.ticked).map(i => i.name),
     toBuy: openItems().length,
-    ticked: tickedItems().length,
-    tickBehaviour: v === "B" ? "removed on tick (undo toast)" : "struck through until cleared",
-    provenance: v === "A" ? "source chips per row"
+    provenance: v === "A" ? "source chips per row, each with that dish's number"
               : v === "B" ? "grouping by Suggestion"
-              : "detail pane (Suggestion → Dish → run → profile)",
+              : "detail pane (Suggestion -> Dish -> run -> profile)",
     export: v === "A" ? "copy plain text" : v === "B" ? "navigator.share" : "copy + share + shop mode",
-    list: state.list.map(i => ({
-      name: i.name, qty: i.qty, aisle: i.aisle, ticked: i.ticked,
-      for: i.sources.map(s => s.suggestion),
-    })),
+    list: state.list.map(i => {
+      const perDish = {};
+      i.sources.forEach(s => { perDish[s.suggestion] = shareOf(i, s); });
+      return { name: i.name, buy: totalQty(i), aisle: i.aisle, ticked: i.ticked, perDish: perDish };
+    }),
   }, null, 1);
   const inp = document.getElementById("manualinput");
   if (inp && document.activeElement !== inp && state.ui.draft) {
