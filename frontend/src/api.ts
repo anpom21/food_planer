@@ -49,6 +49,7 @@ export function replaceDish(id: string, input: DishInput): Promise<Dish> {
 
 export function deleteDish(id: string): Promise<void> {
   return fetch(`/api/dishes/${id}`, { method: "DELETE" }).then((r) => {
-    if (!r.ok && r.status !== 204) throw new Error(r.statusText);
+    // The backend answers 204, but any 2xx counts as success (r.ok covers it).
+    if (!r.ok) throw new Error(r.statusText);
   });
 }
