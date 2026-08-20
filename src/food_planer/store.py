@@ -52,6 +52,17 @@ class JsonFile:
                 return json.load(fh)
         return copy.deepcopy(self._default)
 
+    def ensure_persisted(self) -> None:
+        """Write the current cache to disk if the file does not exist yet.
+
+        Lets the :class:`Store` lay down the full data layout on first run so
+        ``data/`` holds one JSON file per entity type from the start, not only
+        once a write happens to touch it. The bare :class:`JsonFile` primitive
+        stays lazy; this is a deliberate, one-off materialisation step.
+        """
+        if not self.path.exists():
+            self._atomic_write(self._cache)
+
     def read(self) -> Any:
         """Return a deep copy of the cached contents.
 
@@ -108,6 +119,10 @@ class Store:
             name: JsonFile(self.data_dir / f"{name}.json", default)
             for name, default in ENTITY_DEFAULTS.items()
         }
+        # Lay down one JSON file per entity type on first run, so the on-disk
+        # layout is complete and self-evident before any write happens.
+        for jf in self._files.values():
+            jf.ensure_persisted()
 
     def __getitem__(self, name: str) -> JsonFile:
         return self._files[name]

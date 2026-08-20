@@ -49,6 +49,19 @@ def test_data_layout_is_created_on_first_run(client, data_dir: Path) -> None:
     assert (data_dir / "dishes.json").is_file()
 
 
+def test_every_entity_file_exists_on_first_run(client, data_dir: Path) -> None:
+    # data/ holds one JSON file per entity type immediately after first run —
+    # not only once a write happens to touch it (acceptance criterion #2).
+    import json
+
+    from food_planer.store import ENTITY_DEFAULTS
+
+    for name, default in ENTITY_DEFAULTS.items():
+        path = data_dir / f"{name}.json"
+        assert path.is_file(), f"{name}.json should exist on first run"
+        assert json.loads(path.read_text(encoding="utf-8")) == default
+
+
 def test_recipe_can_be_cleared_with_null(client) -> None:
     dish = client.post(
         "/api/dishes", json={"title": "Salad", "recipe": "Toss it"}
