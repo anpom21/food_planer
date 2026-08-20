@@ -29,7 +29,12 @@
   that don't match, the amounts are joined rather than summed and each dish
   keeps its full amount.
 
-  --- Still open, and what the variants disagree about ----------------------
+  CHOSEN DIRECTION: variant A — the flat merged checklist. B and C are kept
+  on this branch as the primary source of the comparison, not as live options.
+  A now also carries the CSV export ("Ingredient, Quantity, Notes", multiple
+  notes joined with ";"), which settles the export question for the screen.
+
+  --- What the variants disagreed about, kept for reference -----------------
 
     - How does an item trace back to the Suggestion / Dish it came from?
         A = source chips per row, each carrying that dish's number
@@ -499,6 +504,41 @@ function exportText(opts) {
   }
   return lines.join("\n");
 }
+/* --- CSV export: Ingredient, Quantity, Notes -----------------------------
+ * One row per outstanding ingredient. Notes carry the provenance — one note
+ * per dish that wants the ingredient, joined with ";" when there's more than
+ * one, and the hand-written note for items with no dish behind them. A shared
+ * ingredient's note also carries that dish's share, since the Quantity column
+ * only holds the total.
+ * ---------------------------------------------------------------------- */
+function csvCell(v) {
+  const s = String(v == null ? "" : v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function notesFor(it) {
+  if (!it.sources.length) return it.manualNote ? [it.manualNote] : [];
+  return it.sources.map(s => isShared(it) ? s.suggestion + " " + shareOf(it, s) : s.suggestion);
+}
+function csvText(items) {
+  const rows = [["Ingredient", "Quantity", "Notes"]];
+  (items || openItems()).forEach(i => rows.push([i.name, totalQty(i), notesFor(i).join("; ")]));
+  return rows.map(r => r.map(csvCell).join(",")).join("\n") + "\n";
+}
+function downloadCSV() {
+  // \ufeff so Excel reads the UTF-8 back correctly (æ/ø/å in dish names).
+  const blob = new Blob(["\ufeff" + csvText()], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "shopping-list.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  flash("shopping-list.csv downloaded");
+  render();
+}
+
 function copyExport(text) {
   if (navigator.clipboard) navigator.clipboard.writeText(text);
   flash("Copied to clipboard");
@@ -564,13 +604,16 @@ function VariantA() {
     + '<div class="a-wrap">'
     + '<div class="a-bar"><div><h1>Shopping list</h1>'
     + '<div class="sub">' + openItems().length + " to buy · amounts are the total across every dish</div></div>"
-    + "<button class=\"btn primary\" onclick=\"state.ui.modal={by:false};render()\">Copy list</button></div>"
+    + '<div style="display:flex;gap:8px">'
+    + '<button class="btn" onclick="downloadCSV()">Export CSV</button>'
+    + "<button class=\"btn primary\" onclick=\"state.ui.modal={by:false};render()\">Copy list</button></div></div>"
     + manualAdder()
     + '<div class="a-list">'
     + (state.list.length ? rows : '<div class="empty">Nothing left to buy. 🎉</div>')
     + "</div>"
     + '<div class="sub" style="margin-top:12px">Tick an item and it stays struck through for a moment '
-    + "before fading away — un-tick inside that window if you grabbed the wrong thing.</div>"
+    + "before fading away — un-tick inside that window if you grabbed the wrong thing. "
+    + "<b>Export CSV</b> writes Ingredient / Quantity / Notes, with one note per dish.</div>"
     + "</div>"
     + (state.ui.modal ? exportModal(false, "Take this to the shop") : "")
     + toastHTML();
