@@ -64,6 +64,49 @@ class Dish(DishIn):
     id: str
 
 
+class PlanningSettings(BaseModel):
+    """Per-Profile planning preferences (ADR 0001), stored inline on the Profile.
+
+    The Settings screen (a later ticket) owns editing these; here they only need
+    a sensible default so a freshly-identified Profile is immediately plannable
+    and ``GET /api/profiles/{id}`` has something to embed.
+    """
+
+    daysToPlan: int = 7
+    suggestionsPerDay: int = 2
+    knownVsUnknownBias: float = 0.5
+    priority: list[str] = Field(
+        default_factory=lambda: ["cheap", "quick", "delicious", "healthy"]
+    )
+    shops: list[str] = Field(default_factory=list)
+    inspiration: str = ""
+
+
+class IdentifyIn(BaseModel):
+    email: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+
+
+class ProfileSummary(BaseModel):
+    """The switcher list row — no embedded settings; that's the {id} read."""
+
+    id: str
+    email: str
+    name: str
+
+
+class Profile(ProfileSummary):
+    settings: PlanningSettings
+
+
+def _normalize_email(email: str) -> str:
+    """Email is the lookup key, so fold case and trim before matching/storing.
+
+    Keeps "Ada@Example.com " and "ada@example.com" from becoming two Profiles.
+    """
+    return email.strip().lower()
+
+
 def create_app(
     *,
     data_dir: str | os.PathLike[str] = DEFAULT_DATA_DIR,
@@ -80,6 +123,47 @@ def create_app(
     @api.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    # --- Profiles: identify & switch (issue #17) ---------------------------
+    # Email is a backend lookup key; the frontend keeps only a profileId
+    # pointer in localStorage, so the backend is the single source of truth.
+
+    @api.post("/profiles/identify", response_model=Profile)
+    async def identify_profile(
+        body: IdentifyIn, store: Store = Depends(get_store)
+    ) -> dict:
+        email = _normalize_email(body.email)
+        name = body.name.strip()
+
+        def find_or_create(profiles: list) -> dict:
+            # The find-or-create decision lives inside the file lock so two
+            # people typing the same new email can't create a duplicate.
+            for profile in profiles:
+                if profile["email"] == email:
+                    return profile  # existing wins; the typed name is discarded
+            record = {
+                "id": new_id(),
+                "email": email,
+                "name": name,
+                "settings": PlanningSettings().model_dump(),
+            }
+            profiles.append(record)
+            return record
+
+        return await store["profiles"].update(find_or_create)
+
+    @api.get("/profiles", response_model=list[ProfileSummary])
+    def list_profiles(store: Store = Depends(get_store)) -> list[dict]:
+        return store["profiles"].read()
+
+    @api.get("/profiles/{profile_id}", response_model=Profile)
+    def get_profile(
+        profile_id: str, store: Store = Depends(get_store)
+    ) -> dict:
+        for profile in store["profiles"].read():
+            if profile["id"] == profile_id:
+                return profile
+        raise HTTPException(status_code=404, detail="Profile not found")
 
     @api.get("/dishes", response_model=list[Dish])
     def list_dishes(store: Store = Depends(get_store)) -> list[dict]:
