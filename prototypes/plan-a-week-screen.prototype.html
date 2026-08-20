@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PROTOTYPE — Plan a Week screen</title>
+<!--
+  PROTOTYPE — throwaway. Answers: "what should the Plan a Week screen look and
+  behave like?" (issues/6, child of issues/1).
+
+  Three variants, switchable via ?variant=A|B|C, the floating bottom bar, or
+  the arrow keys. Plain HTML/CSS/JS (no framework locked in yet). Open the file
+  directly in a browser.
+
+  Questions this prototype is pressure-testing:
+    - How is FridgeContext entered/updated inline, incl. the transient
+      "analyzing image..." step (images are discarded after analysis)?
+    - Per-run override of the Profile's PlanningSettings, or defaults only?
+    - How are Suggestions displayed (schema per issues/3: title, description,
+      ingredients[{name,quantity}], estimatedCost, prepTimeMinutes,
+      discountIds, sourceDish) and how do their ingredients reach the
+      ShoppingList?
+    - Do past PlanningRuns stay browsable, or are they ephemeral?
+      A = ephemeral, B = shallow (recent runs list), C = full archive.
+
+  Not wired to anything real. No persistence, no backend, no LLM — runs are
+  faked locally. Live state is printed in the "State" panel (bottom-left).
+-->
+<style>
+  :root {
+    --ink: #1c1c1e;
+    --muted: #6b6b70;
+    --line: #dcdcdf;
+    --bg: #f6f6f7;
+    --card: #ffffff;
+    --accent: #2f6f4f;
+    --accent-soft: #e8f1ec;
+    --accent-ink: #ffffff;
+    --warn: #8a5a12;
+    --warn-soft: #fdf3e2;
+    --discount: #a3341f;
+    --discount-soft: #fbeae6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    padding-bottom: 110px;
+    font-size: 14px;
+  }
+  header.app {
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+    padding: 14px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header.app .brand { font-weight: 700; font-size: 15px; }
+  header.app .crumb { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  header.app nav { display: flex; gap: 14px; font-size: 13px; color: var(--muted); }
+  header.app nav .on { color: var(--ink); font-weight: 600; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .hint { font-size: 12px; color: var(--muted); font-weight: 400; }
+  textarea, input[type="text"], select {
+    width: 100%; padding: 9px 10px; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--card); font: inherit; color: inherit;
+  }
+  textarea { min-height: 78px; resize: vertical; }
+  button { font: inherit; cursor: pointer; }
+  .btn {
+    border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    padding: 8px 14px; border-radius: 8px;
+  }
+  .btn:hover { background: #efefef; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.big { padding: 12px 22px; font-size: 15px; font-weight: 600; }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--accent); padding: 6px 8px; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+    padding: 3px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line);
+    color: var(--muted);
+  }
+  .chip.known { background: var(--accent-soft); color: var(--accent); border-color: #cfe3d8; }
+  .chip.unknown { background: #eef0fa; color: #3f4a8a; border-color: #d8dcf0; }
+  .chip.discount { background: var(--discount-soft); color: var(--discount); border-color: #f0d3cc; }
+  .banner {
+    border-radius: 10px; padding: 10px 12px; font-size: 13px;
+    background: var(--warn-soft); color: var(--warn); border: 1px solid #f0dcbb;
+    display: flex; gap: 10px; align-items: center; justify-content: space-between;
+  }
+  .analyzing {
+    display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted);
+    background: var(--bg); border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px;
+  }
+  .spinner {
+    width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--line);
+    border-top-color: var(--accent); animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .sugg { border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 12px; }
+  .sugg .title { font-weight: 700; font-size: 14px; }
+  .sugg .desc { color: var(--muted); font-size: 12.5px; margin: 5px 0 8px; line-height: 1.4; }
+  .sugg .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .sugg ul { margin: 0 0 10px; padding-left: 17px; font-size: 12.5px; color: #3a3a3e; }
+  .sugg ul li { margin-bottom: 2px; }
+  .sugg .acts { display: flex; gap: 8px; align-items: center; }
+  .added { font-size: 12px; color: var(--accent); font-weight: 600; }
+  .daylabel { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 28px 10px; }
+
+  /* --- floating prototype switcher --- */
+  #switcher {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    background: #111; color: #fff; border-radius: 999px; padding: 7px 9px;
+    display: flex; align-items: center; gap: 10px; z-index: 999;
+    box-shadow: 0 6px 22px rgba(0,0,0,.3); font-size: 13px;
+  }
+  #switcher button {
+    background: #2c2c2e; color: #fff; border: none; border-radius: 999px;
+    width: 28px; height: 28px; font-size: 14px;
+  }
+  #switcher button:hover { background: #444; }
+  #switcher .lbl { min-width: 250px; text-align: center; font-weight: 600; }
+  #switcher .tag { font-size: 10px; opacity: .55; text-transform: uppercase; letter-spacing: .08em; }
+  #statepanel {
+    position: fixed; bottom: 18px; left: 18px; z-index: 998; max-width: 340px;
+    background: #111; color: #d8d8d8; border-radius: 10px; font-size: 11px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    box-shadow: 0 6px 22px rgba(0,0,0,.3);
+  }
+  #statepanel .hd { padding: 6px 10px; color: #fff; cursor: pointer; font-weight: 700; }
+  #statepanel pre { margin: 0; padding: 0 10px 10px; max-height: 42vh; overflow: auto; white-space: pre-wrap; }
+
+  /* --- Variant A: single-column linear flow --- */
+  .a-wrap { max-width: 720px; margin: 0 auto; padding: 24px 20px; }
+  .a-step { margin-bottom: 14px; }
+  .a-stepno {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%; background: var(--accent);
+    color: #fff; font-size: 12px; font-weight: 700; margin-right: 8px;
+  }
+  .a-summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .a-day { margin-bottom: 18px; }
+  .a-day .row { display: grid; gap: 10px; }
+
+  /* --- Variant B: control sidebar + results --- */
+  .b-grid { display: grid; grid-template-columns: 320px 1fr; gap: 0; min-height: calc(100vh - 160px); }
+  .b-side { background: var(--card); border-right: 1px solid var(--line); padding: 18px; }
+  .b-side .blk { margin-bottom: 20px; }
+  .b-main { padding: 22px 24px; overflow: auto; }
+  .b-runitem {
+    display: flex; justify-content: space-between; gap: 8px; padding: 7px 9px; border-radius: 8px;
+    font-size: 12.5px; cursor: pointer; border: 1px solid transparent;
+  }
+  .b-runitem:hover { background: var(--bg); }
+  .b-runitem.on { background: var(--accent-soft); border-color: #cfe3d8; color: var(--accent); font-weight: 600; }
+  .b-acc { border: 1px solid var(--line); border-radius: 10px; background: var(--card); margin-bottom: 10px; overflow: hidden; }
+  .b-acc .hd {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 11px 14px; cursor: pointer; background: var(--card);
+  }
+  .b-acc .hd:hover { background: var(--bg); }
+  .b-acc .bd { padding: 0 14px 14px; display: grid; gap: 10px; }
+
+  /* --- Variant C: full-bleed day board --- */
+  .c-bar {
+    background: var(--card); border-bottom: 1px solid var(--line); padding: 10px 20px;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .c-fridgechip {
+    display: flex; align-items: center; gap: 8px; border: 1px solid var(--line);
+    border-radius: 999px; padding: 6px 12px; background: var(--bg); max-width: 460px;
+    font-size: 12.5px; color: var(--muted); cursor: pointer;
+  }
+  .c-fridgechip:hover { background: #ececee; }
+  .c-fridgechip .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .c-board { display: flex; gap: 14px; padding: 20px; overflow-x: auto; align-items: flex-start; }
+  .c-col { flex: 0 0 290px; background: #eeeef0; border-radius: 12px; padding: 10px; }
+  .c-col .hd { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 9px; padding: 0 3px; }
+  .c-col .stack { display: grid; gap: 9px; }
+  .modal-back {
+    position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 900;
+    display: flex; align-items: flex-start; justify-content: center; padding: 60px 20px;
+  }
+  .modal { background: var(--card); border-radius: 12px; width: 100%; max-width: 620px; padding: 20px; }
+  .modal .ft { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .c-archive { display: grid; gap: 8px; }
+  .c-archrow {
+    display: flex; justify-content: space-between; gap: 10px; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--card); cursor: pointer;
+  }
+  .c-archrow:hover { border-color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="statepanel"><div class="hd" onclick="toggleState()">▸ State</div><pre id="statejson" style="display:none"></pre></div>
+<div id="switcher"></div>
+
+<script>
+/* ------------------------------------------------------------------ *
+ * Seed data — stand-ins for the real Dish library / DiscountData      *
+ * ------------------------------------------------------------------ */
+const DISHES = [
+  { id: "d1", title: "Frikadeller med kartofler", favourite: false },
+  { id: "d2", title: "Pasta med pesto og kylling", favourite: false },
+  { id: "d3", title: "Hjemmelavet pizza", favourite: true },
+  { id: "d4", title: "Grønsagslasagne", favourite: false },
+  { id: "d5", title: "Fiskefilet med remoulade", favourite: false },
+];
+
+const POOL = [
+  { title: "Frikadeller med kartofler og persillesovs", sourceDish: "d1", prepTimeMinutes: 45, estimatedCost: 62,
+    description: "Klassiske frikadeller — svinekød er på tilbud i Netto denne uge.",
+    ingredients: [{name:"Hakket svinekød",quantity:"500 g"},{name:"Kartofler",quantity:"1 kg"},{name:"Mælk",quantity:"3 dl"},{name:"Persille",quantity:"1 bundt"}],
+    discountIds: ["o-102"] },
+  { title: "Pasta med pesto, kylling og spinat", sourceDish: "d2", prepTimeMinutes: 25, estimatedCost: 54,
+    description: "Hurtig hverdagsret. Kyllingebryst er nedsat 30% i Rema 1000.",
+    ingredients: [{name:"Kyllingebryst",quantity:"600 g"},{name:"Pasta",quantity:"400 g"},{name:"Pesto",quantity:"1 glas"},{name:"Spinat",quantity:"150 g"}],
+    discountIds: ["o-118"] },
+  { title: "Hjemmelavet pizza med chorizo", sourceDish: "d3", prepTimeMinutes: 90, estimatedCost: 71,
+    description: "Fredagsfavorit — dejen kan laves om morgenen.",
+    ingredients: [{name:"Hvedemel",quantity:"500 g"},{name:"Chorizo",quantity:"200 g"},{name:"Mozzarella",quantity:"2 stk"},{name:"Tomatsauce",quantity:"1 dåse"}],
+    discountIds: [] },
+  { title: "Grønsagslasagne", sourceDish: "d4", prepTimeMinutes: 60, estimatedCost: 48,
+    description: "Bruger squash og aubergine, som du allerede har i køleskabet.",
+    ingredients: [{name:"Lasagneplader",quantity:"1 pk"},{name:"Squash",quantity:"1 stk"},{name:"Revet ost",quantity:"200 g"}],
+    discountIds: ["o-140"] },
+  { title: "Ovnbagt torsk med kartoffelmos", sourceDish: "d5", prepTimeMinutes: 35, estimatedCost: 66,
+    description: "Torskefilet er nedsat i Føtex denne uge.",
+    ingredients: [{name:"Torskefilet",quantity:"600 g"},{name:"Kartofler",quantity:"800 g"},{name:"Citron",quantity:"1 stk"}],
+    discountIds: ["o-155"] },
+  { title: "Shakshuka med feta", sourceDish: null, prepTimeMinutes: 30, estimatedCost: 39,
+    description: "Ny ret i middelhavsstil — matcher din inspiration om mere grønt.",
+    ingredients: [{name:"Hakkede tomater",quantity:"2 dåser"},{name:"Æg",quantity:"6 stk"},{name:"Feta",quantity:"200 g"},{name:"Spidskommen",quantity:"1 tsk"}],
+    discountIds: ["o-160"] },
+  { title: "Koreansk bibimbap-skål", sourceDish: null, prepTimeMinutes: 40, estimatedCost: 58,
+    description: "Ukendt ret — bruger resterne af risene og gulerødderne fra køleskabet.",
+    ingredients: [{name:"Ris",quantity:"300 g"},{name:"Oksekød i strimler",quantity:"400 g"},{name:"Gochujang",quantity:"2 spsk"},{name:"Gulerødder",quantity:"3 stk"}],
+    discountIds: [] },
+  { title: "Linsedhal med naan", sourceDish: null, prepTimeMinutes: 35, estimatedCost: 31,
+    description: "Billigste forslag i ugen — tørrede linser er nedsat i Lidl.",
+    ingredients: [{name:"Røde linser",quantity:"400 g"},{name:"Kokosmælk",quantity:"1 dåse"},{name:"Naanbrød",quantity:"4 stk"}],
+    discountIds: ["o-171"] },
+  { title: "Kylling i karry med ris", sourceDish: null, prepTimeMinutes: 30, estimatedCost: 52,
+    description: "Simpel gryderet, bygger videre på kyllingetilbuddet.",
+    ingredients: [{name:"Kyllingelår",quantity:"800 g"},{name:"Karry",quantity:"2 spsk"},{name:"Ris",quantity:"300 g"}],
+    discountIds: ["o-118"] },
+];
+
+const DAY_NAMES = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+
+/* ------------------------------------------------------------------ *
+ * State                                                               *
+ * ------------------------------------------------------------------ */
+const state = {
+  profile: { id: "p1", name: "Andreas" },
+  defaultSettings: { daysToPlan: 5, suggestionsPerDay: 3, knownVsUnknown: 60, priority: ["cheap","quick & easy","delicious","healthy"] },
+  runSettings: null,        // per-run override; null = using profile defaults
+  fridgeText: "Rester af ris, gulerødder, en halv squash, 6 æg, yoghurt, lidt revet ost.",
+  fridgeDraft: null,        // variant-local editing buffer
+  fridgeAnalyzing: false,
+  runs: [],                 // newest first
+  currentRunId: null,
+  shoppingList: [],         // {name, quantity, from}
+  planning: false,
+  // per-variant ui bits
+  ui: { editingFridge: false, showOverride: false, openDays: { 1: true }, modal: null, archiveOpen: false },
+};
+
+let runCounter = 0;
+function makeRun(settings, opts = {}) {
+  runCounter++;
+  const partial = opts.partial === true;
+  const days = partial ? Math.ceil(settings.daysToPlan / 2) : settings.daysToPlan;
+  const perDay = partial ? Math.ceil(settings.suggestionsPerDay / 2) : settings.suggestionsPerDay;
+  let i = (runCounter * 3) % POOL.length;
+  const dayList = [];
+  for (let d = 0; d < days; d++) {
+    const suggestions = [];
+    for (let s = 0; s < perDay; s++) {
+      const base = POOL[i % POOL.length]; i++;
+      suggestions.push({ ...base, id: `r${runCounter}-d${d}-s${s}` });
+    }
+    dayList.push({ day: d + 1, name: DAY_NAMES[d % 7], suggestions });
+  }
+  return {
+    id: `run-${runCounter}`,
+    createdAt: new Date(Date.now() - (opts.ageMinutes || 0) * 60000),
+    profileId: state.profile.id,
+    status: partial ? "partial" : "success",
+    requestedDays: settings.daysToPlan,
+    requestedSuggestionsPerDay: settings.suggestionsPerDay,
+    days: dayList,
+    fridgeSnippet: state.fridgeText.slice(0, 60),
+  };
+}
+
+// Seed a little history so the "browsable past runs" question is testable.
+(function seedHistory() {
+  const older = makeRun({ ...state.defaultSettings, daysToPlan: 4 }, { ageMinutes: 60 * 26 });
+  const partial = makeRun(state.defaultSettings, { partial: true, ageMinutes: 60 * 3 });
+  state.runs = [partial, older];
+  state.currentRunId = partial.id;
+})();
+
+const settingsInUse = () => state.runSettings || state.defaultSettings;
+const currentRun = () => state.runs.find(r => r.id === state.currentRunId) || null;
+const isOverridden = () => state.runSettings !== null;
+
+function plan() {
+  state.planning = true; render();
+  setTimeout(() => {
+    const run = makeRun(settingsInUse());
+    state.runs.unshift(run);
+    state.currentRunId = run.id;
+    state.planning = false;
+    state.ui.openDays = { 1: true };
+    render();
+  }, 1200);
+}
+
+function analyzeImage() {
+  state.fridgeAnalyzing = true; render();
+  setTimeout(() => {
+    state.fridgeAnalyzing = false;
+    const derived = "Fra billede: 4 æg, en pose gulerødder, halv agurk, ost, rester af pasta.";
+    state.fridgeText = (state.fridgeText ? state.fridgeText + "\n" : "") + derived;
+    state.fridgeDraft = null;
+    state.ui.editingFridge = false;
+    render();
+  }, 1800);
+}
+
+function addToList(sugg) {
+  sugg.ingredients.forEach(ing => {
+    if (!state.shoppingList.some(x => x.name === ing.name && x.from === sugg.title))
+      state.shoppingList.push({ name: ing.name, quantity: ing.quantity, from: sugg.title });
+  });
+  render();
+}
+const isAdded = (sugg) => sugg.ingredients.every(ing => state.shoppingList.some(x => x.name === ing.name && x.from === sugg.title));
+
+function setOverride(patch) {
+  state.runSettings = { ...settingsInUse(), ...patch };
+  render();
+}
+function resetOverride() { state.runSettings = null; render(); }
+
+/* ------------------------------------------------------------------ *
+ * Shared bits of markup                                               *
+ * ------------------------------------------------------------------ */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const fmtTime = d => d.toLocaleString(undefined, { weekday:"short", hour:"2-digit", minute:"2-digit" });
+
+function suggestionCard(sugg, opts = {}) {
+  const known = !!sugg.sourceDish;
+  const dish = known ? DISHES.find(d => d.id === sugg.sourceDish) : null;
+  const added = isAdded(sugg);
+  return `
+    <div class="sugg">
+      <div class="title">${esc(sugg.title)}</div>
+      <div class="desc">${esc(sugg.description)}</div>
+      <div class="meta">
+        <span class="chip ${known ? "known" : "unknown"}">${known ? "⭐ " + esc(dish ? dish.title : "Known dish") : "✨ New to you"}</span>
+        <span class="chip">⏱ ${sugg.prepTimeMinutes} min</span>
+        <span class="chip">~${sugg.estimatedCost} kr</span>
+        ${sugg.discountIds.length ? `<span class="chip discount">% ${sugg.discountIds.length} on offer</span>` : ""}
+      </div>
+      ${opts.compact ? "" : `<ul>${sugg.ingredients.map(i => `<li>${esc(i.quantity)} ${esc(i.name)}</li>`).join("")}</ul>`}
+      <div class="acts">
+        ${added
+          ? `<span class="added">✓ Added to shopping list</span>`
+          : `<button class="btn" onclick='addToList(${JSON.stringify(sugg).replace(/'/g, "&#39;")})'>+ Add ingredients</button>`}
+        ${opts.compact ? `<button class="btn ghost" onclick="alert('Prototype: would open the full suggestion')">Details</button>` : ""}
+      </div>
+    </div>`;
+}
+
+function partialBanner(run) {
+  if (!run || run.status !== "partial") return "";
+  return `<div class="banner" style="margin-bottom:14px">
+    <span>⚠ Partial plan — asked for ${run.requestedDays} days × ${run.requestedSuggestionsPerDay}, the model only returned ${run.days.length} × ${run.days[0].suggestions.length}.</span>
+    <button class="btn" onclick="plan()">Try again</button>
+  </div>`;
+}
+
+function appHeader(subtitle) {
+  return `<header class="app">
+    <div><div class="brand">Food Planner</div><div class="crumb">${esc(subtitle)}</div></div>
+    <nav><span>Dish Library</span><span class="on">Plan a Week</span><span>Shopping List (${state.shoppingList.length})</span><span>Settings</span></nav>
+  </header>`;
+}
+
+function settingsSummaryText() {
+  const s = settingsInUse();
+  return `${s.daysToPlan} days × ${s.suggestionsPerDay} suggestions · ${s.knownVsUnknown}% known dishes · ${s.priority[0]} first`;
+}
+
+function overrideControls() {
+  const s = settingsInUse();
+  return `
+    <div style="display:grid;gap:12px">
+      <div style="display:flex;gap:16px">
+        <div><label>Days</label><select onchange="setOverride({daysToPlan:+this.value})">
+          ${[3,4,5,6,7].map(n => `<option ${n===s.daysToPlan?"selected":""}>${n}</option>`).join("")}</select></div>
+        <div><label>Per day</label><select onchange="setOverride({suggestionsPerDay:+this.value})">
+          ${[1,2,3,4].map(n => `<option ${n===s.suggestionsPerDay?"selected":""}>${n}</option>`).join("")}</select></div>
+      </div>
+      <div>
+        <label>Known vs. new dishes <span class="hint">${s.knownVsUnknown}% known</span></label>
+        <input type="range" min="0" max="100" step="10" value="${s.knownVsUnknown}" style="width:100%"
+               oninput="setOverride({knownVsUnknown:+this.value})">
+      </div>
+      ${isOverridden() ? `<div><span class="hint">Just for this run — your saved Settings are untouched.</span>
+        <button class="btn ghost" onclick="resetOverride()">Reset to my defaults</button></div>` : ""}
+    </div>`;
+}
+
+function fridgeEditor() {
+  const val = state.fridgeDraft === null ? state.fridgeText : state.fridgeDraft;
+  return `
+    <textarea oninput="state.fridgeDraft=this.value" placeholder="What's in the fridge right now?">${esc(val)}</textarea>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+      <button class="btn" onclick="analyzeImage()">📷 Add a photo</button>
+      <span class="hint">Photos are read once, then discarded — only the text is kept.</span>
+    </div>
+    ${state.fridgeAnalyzing ? `<div class="analyzing" style="margin-top:8px"><span class="spinner"></span> Analyzing image…</div>` : ""}`;
+}
+
+function commitFridge() {
+  if (state.fridgeDraft !== null) state.fridgeText = state.fridgeDraft;
+  state.fridgeDraft = null;
+  state.ui.editingFridge = false;
+  render();
+}
+
+/* ------------------------------------------------------------------ *
+ * Variant A — linear flow, latest run only (history: ephemeral)       *
+ * ------------------------------------------------------------------ */
+function VariantA() {
+  const run = currentRun();
+  const showResults = run && !state.planning;
+  return `
+    ${appHeader("Plan a Week")}
+    <div class="a-wrap">
+      <h1>Plan a Week</h1>
+      <div class="sub" style="margin-bottom:20px">Three steps, top to bottom. Only the latest plan is kept — plan again and it replaces this one.</div>
+
+      <div class="card a-step">
+        <h2><span class="a-stepno">1</span>What's in the fridge?</h2>
+        ${state.ui.editingFridge
+          ? `${fridgeEditor()}<div style="margin-top:10px"><button class="btn primary" onclick="commitFridge()">Save</button></div>`
+          : `<div class="a-summary">
+               <div class="sub" style="white-space:pre-wrap">${esc(state.fridgeText) || "<em>Nothing noted yet</em>"}</div>
+               <button class="btn" onclick="state.ui.editingFridge=true;render()">Edit</button>
+             </div>
+             ${state.fridgeAnalyzing ? `<div class="analyzing" style="margin-top:8px"><span class="spinner"></span> Analyzing image…</div>` : ""}`}
+      </div>
+
+      <div class="card a-step">
+        <h2><span class="a-stepno">2</span>Settings for this run</h2>
+        <div class="a-summary">
+          <div class="sub">${esc(settingsSummaryText())}${isOverridden() ? " <strong>(changed for this run)</strong>" : ""}</div>
+          <button class="btn" onclick="state.ui.showOverride=!state.ui.showOverride;render()">${state.ui.showOverride ? "Done" : "Adjust"}</button>
+        </div>
+        ${state.ui.showOverride ? `<div style="margin-top:14px">${overrideControls()}</div>` : ""}
+      </div>
+
+      <div style="text-align:center;margin:22px 0 26px">
+        <button class="btn primary big" onclick="plan()" ${state.planning ? "disabled" : ""}>
+          ${state.planning ? "Planning…" : (run ? "Plan again" : "Plan my week")}
+        </button>
+        ${run ? `<div class="hint" style="margin-top:8px">Replaces the plan below.</div>` : ""}
+      </div>
+
+      ${state.planning ? `<div class="card"><div class="analyzing"><span class="spinner"></span> Asking the model for ${settingsInUse().daysToPlan} days…</div></div>` : ""}
+
+      ${showResults ? `
+        ${partialBanner(run)}
+        <div class="sub" style="margin-bottom:14px">Plan from ${fmtTime(run.createdAt)}</div>
+        ${run.days.map(d => `
+          <div class="a-day">
+            <div class="daylabel" style="margin-bottom:8px">Day ${d.day} — ${d.name}</div>
+            <div class="row">${d.suggestions.map(s => suggestionCard(s)).join("")}</div>
+          </div>`).join("")}
+      ` : (!state.planning ? `<div class="empty">No plan yet — hit “Plan my week”.</div>` : "")}
+    </div>`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Variant B — persistent control sidebar + day accordion              *
+ * (history: shallow — a "recent runs" list in the sidebar)            *
+ * ------------------------------------------------------------------ */
+function VariantB() {
+  const run = currentRun();
+  const open = state.ui.openDays;
+  return `
+    ${appHeader("Plan a Week")}
+    <div class="b-grid">
+      <aside class="b-side">
+        <div class="blk">
+          <label>Fridge right now</label>
+          ${fridgeEditor()}
+          <div style="margin-top:8px"><button class="btn" onclick="commitFridge()">Save fridge</button></div>
+        </div>
+        <div class="blk">
+          <label>This run</label>
+          ${overrideControls()}
+        </div>
+        <div class="blk">
+          <button class="btn primary" style="width:100%" onclick="plan()" ${state.planning ? "disabled" : ""}>
+            ${state.planning ? "Planning…" : "Plan my week"}</button>
+        </div>
+        <div class="blk">
+          <label>Recent plans <span class="hint">(last few)</span></label>
+          ${state.runs.slice(0, 4).map(r => `
+            <div class="b-runitem ${r.id === state.currentRunId ? "on" : ""}" onclick="state.currentRunId='${r.id}';render()">
+              <span>${fmtTime(r.createdAt)}</span>
+              <span>${r.days.length}d${r.status === "partial" ? " ⚠" : ""}</span>
+            </div>`).join("")}
+          ${state.runs.length > 4 ? `<div class="hint" style="margin-top:6px">Older plans aren't kept.</div>` : ""}
+        </div>
+      </aside>
+      <main class="b-main">
+        ${state.planning ? `<div class="card"><div class="analyzing"><span class="spinner"></span> Asking the model…</div></div>` : ""}
+        ${run ? `
+          ${partialBanner(run)}
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">
+            <h1 style="margin:0">Plan from ${fmtTime(run.createdAt)}</h1>
+            <div class="sub">${run.days.length} days · ${run.days.reduce((n,d)=>n+d.suggestions.length,0)} suggestions</div>
+          </div>
+          ${run.days.map(d => `
+            <div class="b-acc">
+              <div class="hd" onclick="state.ui.openDays[${d.day}]=!state.ui.openDays[${d.day}];render()">
+                <div><span class="daylabel">Day ${d.day} — ${d.name}</span>
+                  <span class="sub" style="margin-left:8px">${d.suggestions.map(s=>esc(s.title.split(" ").slice(0,3).join(" "))).join(" · ")}</span></div>
+                <span class="sub">${open[d.day] ? "▾" : "▸"}</span>
+              </div>
+              ${open[d.day] ? `<div class="bd">${d.suggestions.map(s => suggestionCard(s)).join("")}</div>` : ""}
+            </div>`).join("")}
+        ` : `<div class="empty">Pick your settings on the left and plan a week.</div>`}
+      </main>
+    </div>`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Variant C — results-first day board; controls in a modal            *
+ * (history: full archive)                                             *
+ * ------------------------------------------------------------------ */
+function VariantC() {
+  const run = currentRun();
+  return `
+    ${appHeader("Plan a Week")}
+    <div class="c-bar">
+      <button class="btn primary" onclick="plan()" ${state.planning ? "disabled" : ""}>${state.planning ? "Planning…" : "⚡ Plan my week"}</button>
+      <div class="c-fridgechip" onclick="state.ui.modal='fridge';render()">
+        <span>🧊</span><span class="txt">${esc(state.fridgeText.replace(/\n/g," ")) || "Add fridge contents"}</span><span>✎</span>
+      </div>
+      <button class="btn" onclick="state.ui.modal='settings';render()">⚙ ${esc(settingsSummaryText())}${isOverridden() ? " •" : ""}</button>
+      <div style="flex:1"></div>
+      <button class="btn" onclick="state.ui.archiveOpen=!state.ui.archiveOpen;render()">🕘 Past plans (${state.runs.length})</button>
+    </div>
+    ${state.fridgeAnalyzing ? `<div style="padding:10px 20px"><div class="analyzing"><span class="spinner"></span> Analyzing image…</div></div>` : ""}
+    ${state.ui.archiveOpen ? `
+      <div style="padding:16px 20px 0">
+        <div class="card">
+          <h2>Past plans</h2>
+          <div class="c-archive">
+            ${state.runs.map(r => `
+              <div class="c-archrow" onclick="state.currentRunId='${r.id}';state.ui.archiveOpen=false;render()">
+                <div><strong>${fmtTime(r.createdAt)}</strong>
+                  <div class="hint">${r.days.length} days · ${r.status}${r.id === state.currentRunId ? " · showing" : ""}</div></div>
+                <div class="hint" style="max-width:280px;text-align:right">🧊 ${esc(r.fridgeSnippet)}…</div>
+              </div>`).join("")}
+          </div>
+          <div class="hint" style="margin-top:10px">Every plan is kept — nothing is pruned in this prototype.</div>
+        </div>
+      </div>` : ""}
+    <div style="padding:16px 20px 0">${partialBanner(run)}</div>
+    ${state.planning ? `<div style="padding:0 20px"><div class="card"><div class="analyzing"><span class="spinner"></span> Asking the model…</div></div></div>` : ""}
+    ${run ? `
+      <div class="c-board">
+        ${run.days.map(d => `
+          <div class="c-col">
+            <div class="hd"><span class="daylabel">${d.name}</span><span class="hint">Day ${d.day}</span></div>
+            <div class="stack">${d.suggestions.map(s => suggestionCard(s, { compact: true })).join("")}</div>
+          </div>`).join("")}
+      </div>` : `<div class="empty">No plan on screen — hit “Plan my week”.</div>`}
+    ${state.ui.modal === "fridge" ? `
+      <div class="modal-back" onclick="if(event.target===this){state.ui.modal=null;render()}">
+        <div class="modal"><h2>Fridge contents</h2>${fridgeEditor()}
+          <div class="ft"><button class="btn" onclick="state.fridgeDraft=null;state.ui.modal=null;render()">Cancel</button>
+            <button class="btn primary" onclick="state.ui.modal=null;commitFridge()">Save</button></div></div>
+      </div>` : ""}
+    ${state.ui.modal === "settings" ? `
+      <div class="modal-back" onclick="if(event.target===this){state.ui.modal=null;render()}">
+        <div class="modal"><h2>Settings for this run</h2>${overrideControls()}
+          <div class="ft"><button class="btn primary" onclick="state.ui.modal=null;render()">Done</button></div></div>
+      </div>` : ""}`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Switcher + render                                                   *
+ * ------------------------------------------------------------------ */
+const VARIANTS = {
+  A: { name: "Linear flow · plan is ephemeral", fn: VariantA },
+  B: { name: "Control sidebar · recent plans", fn: VariantB },
+  C: { name: "Day board · full archive", fn: VariantC },
+};
+const keys = Object.keys(VARIANTS);
+function currentVariant() {
+  const v = (new URLSearchParams(location.search).get("variant") || "A").toUpperCase();
+  return VARIANTS[v] ? v : "A";
+}
+function setVariant(v) {
+  const u = new URL(location.href); u.searchParams.set("variant", v);
+  history.replaceState({}, "", u);
+  state.ui = { editingFridge: false, showOverride: false, openDays: { 1: true }, modal: null, archiveOpen: false };
+  render();
+}
+function cycle(step) {
+  const i = keys.indexOf(currentVariant());
+  setVariant(keys[(i + step + keys.length) % keys.length]);
+}
+document.addEventListener("keydown", e => {
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  if (e.key === "ArrowLeft") cycle(-1);
+  if (e.key === "ArrowRight") cycle(1);
+});
+function toggleState() {
+  const pre = document.getElementById("statejson");
+  const hd = document.querySelector("#statepanel .hd");
+  const show = pre.style.display === "none";
+  pre.style.display = show ? "block" : "none";
+  hd.textContent = (show ? "▾" : "▸") + " State";
+}
+function render() {
+  const v = currentVariant();
+  document.getElementById("root").innerHTML = VARIANTS[v].fn();
+  document.getElementById("switcher").innerHTML =
+    `<button onclick="cycle(-1)">‹</button>
+     <div class="lbl"><div class="tag">prototype variant</div>${v} — ${VARIANTS[v].name}</div>
+     <button onclick="cycle(1)">›</button>`;
+  const run = currentRun();
+  document.getElementById("statejson").textContent = JSON.stringify({
+    variant: v,
+    fridgeText: state.fridgeText,
+    fridgeAnalyzing: state.fridgeAnalyzing,
+    settingsInUse: settingsInUse(),
+    overriddenForThisRun: isOverridden(),
+    runs: state.runs.map(r => ({ id: r.id, status: r.status, days: r.days.length, at: fmtTime(r.createdAt) })),
+    currentRun: run ? { id: run.id, status: run.status, days: run.days.length } : null,
+    shoppingList: state.shoppingList,
+  }, null, 1);
+}
+render();
+</script>
+</body>
+</html>
