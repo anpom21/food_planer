@@ -1,0 +1,119 @@
+"""External service clients: OpenAI (the planner LLM) and Tjek (discounts).
+
+Both are network calls to third parties whose responses are non-deterministic
+and, in OpenAI's case, billed. They are reached through the dependency
+providers in :mod:`food_planer.app` so tests can swap in the fakes below via
+``dependency_overrides`` (see ``spec.md`` → "Testing Decisions").
+
+The real clients are thin placeholders here: the walking skeleton establishes
+the seam and the fakes; the planning pipeline that drives them lands in a later
+ticket.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+
+@dataclass
+class LLMResult:
+    """The outcome of one structured planning call.
+
+    ``status`` mirrors the OpenAI Responses API outcomes the planner branches
+    on: ``"completed"`` (usable output), ``"refused"`` (a safety refusal) and
+    ``"incomplete"`` (the ``max_output_tokens`` ceiling was hit — truncated).
+    """
+
+    status: str
+    output: dict[str, Any] | None = None
+
+
+class OpenAIClient(Protocol):
+    """The seam the planner talks to. One structured call in, one result out."""
+
+    async def create_plan(
+        self, *, prompt: str, max_output_tokens: int
+    ) -> LLMResult: ...
+
+
+class TjekClient(Protocol):
+    """The seam the discount pipeline talks to."""
+
+    async def list_dealers(self) -> list[dict[str, Any]]: ...
+
+    async def list_offers(self, *, dealer_id: str) -> list[dict[str, Any]]: ...
+
+
+class RealOpenAIClient:
+    """Placeholder for the hardcoded OpenAI client (built in a later ticket)."""
+
+    async def create_plan(
+        self, *, prompt: str, max_output_tokens: int
+    ) -> LLMResult:
+        raise NotImplementedError(
+            "The OpenAI planning pipeline is not part of the walking skeleton."
+        )
+
+
+class RealTjekClient:
+    """Placeholder for the Tjek/eTilbudsavis client (built in a later ticket)."""
+
+    async def list_dealers(self) -> list[dict[str, Any]]:
+        raise NotImplementedError(
+            "The Tjek discount pipeline is not part of the walking skeleton."
+        )
+
+    async def list_offers(self, *, dealer_id: str) -> list[dict[str, Any]]:
+        raise NotImplementedError(
+            "The Tjek discount pipeline is not part of the walking skeleton."
+        )
+
+
+# --- Fakes, wired into tests via dependency_overrides -----------------------
+
+
+@dataclass
+class FakeOpenAIClient:
+    """A scriptable stand-in for the planner LLM.
+
+    ``behaviour`` selects one of the four cases the status machine needs to
+    exercise ``success`` / ``partial`` / ``failed`` without spending money:
+
+    - ``"success"``   — return the canned plan immediately.
+    - ``"refuse"``    — a safety refusal on the first call, no retry.
+    - ``"truncate_once"`` — truncate the first call, succeed on the retry.
+    - ``"truncate_twice"`` — truncate every call (the retry fails too).
+    """
+
+    behaviour: str = "success"
+    canned: dict[str, Any] = field(default_factory=lambda: {"suggestions": []})
+    calls: int = 0
+
+    async def create_plan(
+        self, *, prompt: str, max_output_tokens: int
+    ) -> LLMResult:
+        self.calls += 1
+        if self.behaviour == "refuse":
+            return LLMResult(status="refused")
+        if self.behaviour == "truncate_twice":
+            return LLMResult(status="incomplete")
+        if self.behaviour == "truncate_once":
+            if self.calls == 1:
+                return LLMResult(status="incomplete")
+            return LLMResult(status="completed", output=self.canned)
+        return LLMResult(status="completed", output=self.canned)
+
+
+@dataclass
+class FakeTjekClient:
+    """A stand-in returning canned dealer and offer payloads."""
+
+    dealers: list[dict[str, Any]] = field(default_factory=list)
+    offers: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+
+    async def list_dealers(self) -> list[dict[str, Any]]:
+        return list(self.dealers)
+
+    async def list_offers(self, *, dealer_id: str) -> list[dict[str, Any]]:
+        return list(self.offers.get(dealer_id, []))
