@@ -25,6 +25,7 @@ from .clients import (
     RealTjekClient,
     TjekClient,
 )
+from .shopping_list import merge_shopping_list
 from .store import Store, new_id
 
 # Where data/ lives is resolved relative to the running process (the #12
@@ -62,6 +63,21 @@ class DishIn(BaseModel):
 
 class Dish(DishIn):
     id: str
+
+
+class ShoppingSource(BaseModel):
+    suggestionTitle: str
+    kind: str
+
+
+class ShoppingItemIn(BaseModel):
+    name: str = Field(min_length=1)
+    quantity: str = ""
+    source: ShoppingSource | None = None
+
+
+class RemoveItemsIn(BaseModel):
+    lineIds: list[str]
 
 
 def create_app(
@@ -109,6 +125,55 @@ def create_app(
             raise HTTPException(status_code=404, detail="Dish not found")
 
         await store["dishes"].update(remove)
+
+    # --- ShoppingList: one persistent, household-shared list ----------------
+    # Merging (sum totals, join mismatched units, preserve each dish's share)
+    # lives in the pure ``merge_shopping_list`` function; the API returns the
+    # pre-merged rows so the frontend never re-derives them.
+
+    @api.get("/shopping-list")
+    def get_shopping_list(store: Store = Depends(get_store)) -> list[dict]:
+        return merge_shopping_list(store["shopping_list"].read()["items"])
+
+    @api.post("/shopping-list/items", status_code=201)
+    async def add_shopping_items(
+        body: list[ShoppingItemIn], store: Store = Depends(get_store)
+    ) -> list[dict]:
+        # One stored line per submitted item — bulk from a plan or a single
+        # hand-typed item are the same call; they merge on read, not on write.
+        new_lines = [
+            {
+                "id": new_id(),
+                "name": item.name,
+                "quantity": item.quantity,
+                "source": item.source.model_dump() if item.source else None,
+            }
+            for item in body
+        ]
+
+        def add(shopping_list: dict) -> list[dict]:
+            shopping_list["items"].extend(new_lines)
+            return shopping_list["items"]
+
+        items = await store["shopping_list"].update(add)
+        return merge_shopping_list(items)
+
+    @api.post("/shopping-list/items/remove")
+    async def remove_shopping_items(
+        body: RemoveItemsIn, store: Store = Depends(get_store)
+    ) -> list[dict]:
+        # Removing a merged row deletes every underlying line. Idempotent: ids
+        # already gone are a no-op, so a double-tap never errors.
+        targets = set(body.lineIds)
+
+        def remove(shopping_list: dict) -> list[dict]:
+            shopping_list["items"] = [
+                line for line in shopping_list["items"] if line["id"] not in targets
+            ]
+            return shopping_list["items"]
+
+        items = await store["shopping_list"].update(remove)
+        return merge_shopping_list(items)
 
     app.include_router(api)
 
