@@ -190,6 +190,31 @@ def create_app(
                 return profile
         raise HTTPException(status_code=404, detail="Profile not found")
 
+    @api.put("/profiles/{profile_id}/settings", response_model=Profile)
+    async def update_settings(
+        profile_id: str,
+        body: PlanningSettings,
+        store: Store = Depends(get_store),
+    ) -> dict:
+        """Save a Profile's PlanningSettings alone (issue #19, ADR 0001).
+
+        The Settings screen never round-trips name and email just to save a
+        slider: the body is the settings and nothing else. Full replace of the
+        inline ``settings`` block, so any field the caller omits reverts to its
+        default. Only the named Profile is touched, so one person's save can't
+        overwrite their partner's preferences.
+        """
+        settings = body.model_dump()
+
+        def replace_settings(profiles: list) -> dict:
+            for profile in profiles:
+                if profile["id"] == profile_id:
+                    profile["settings"] = settings
+                    return profile
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        return await store["profiles"].update(replace_settings)
+
     @api.get("/dishes", response_model=list[Dish])
     def list_dishes(store: Store = Depends(get_store)) -> list[dict]:
         return store["dishes"].read()

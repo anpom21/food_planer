@@ -70,6 +70,20 @@ export async function getProfile(id: string): Promise<Profile | null> {
   return json<Profile>(resp);
 }
 
+// Save a Profile's PlanningSettings alone (issue #19). The Settings screen
+// never round-trips name and email just to save a slider, so this PUTs the
+// settings block by itself and gets the updated Profile back.
+export function saveSettings(
+  id: string,
+  settings: PlanningSettings,
+): Promise<Profile> {
+  return fetch(`/api/profiles/${id}/settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  }).then((r) => json<Profile>(r));
+}
+
 export function listDishes(): Promise<Dish[]> {
   return fetch("/api/dishes").then((r) => json<Dish[]>(r));
 }

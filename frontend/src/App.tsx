@@ -13,6 +13,7 @@ import {
   type ProfileSummary,
 } from "./api";
 import { DishEditor } from "./DishEditor";
+import { SettingsScreen } from "./SettingsScreen";
 import "./app.css";
 
 // Issue #17 — Identify yourself and switch profiles.
@@ -269,11 +270,14 @@ function DishLibrary() {
   );
 }
 
+type Screen = "library" | "settings";
+
 export function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   // Shown when there's no current profile, or when "Add a profile" is picked.
   const [identifying, setIdentifying] = useState(false);
+  const [screen, setScreen] = useState<Screen>("library");
 
   // Resolve the stored pointer on load.
   useEffect(() => {
@@ -330,7 +334,31 @@ export function App() {
       <p>
         Signed in as <strong>{profile.name}</strong> ({profile.email}).
       </p>
-      <DishLibrary />
+      <nav style={{ display: "flex", gap: "0.5rem" }}>
+        <button
+          onClick={() => setScreen("library")}
+          aria-current={screen === "library"}
+          style={{ fontWeight: screen === "library" ? 700 : 400 }}
+        >
+          Dish library
+        </button>
+        <button
+          onClick={() => setScreen("settings")}
+          aria-current={screen === "settings"}
+          style={{ fontWeight: screen === "settings" ? 700 : 400 }}
+        >
+          Settings
+        </button>
+      </nav>
+      {screen === "library" ? (
+        <DishLibrary />
+      ) : (
+        <SettingsScreen
+          key={profile.id}
+          profile={profile}
+          onSaved={(p) => setProfile(p)}
+        />
+      )}
     </main>
   );
 }
