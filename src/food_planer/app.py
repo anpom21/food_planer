@@ -54,8 +54,17 @@ def get_tjek_client(request: Request) -> TjekClient:
 
 
 class DishIn(BaseModel):
+    """The writable shape of a Dish.
+
+    Only ``title`` is required. ``ingredients``, ``substitutes`` and ``recipe``
+    are optional freeform text (each a textarea in the UI). Because ``PUT`` is a
+    full replace, an omitted optional field defaults to ``None`` and thereby
+    clears whatever was stored before.
+    """
+
     title: str = Field(min_length=1)
-    ingredients: list[str] = Field(default_factory=list)
+    ingredients: str | None = None
+    substitutes: str | None = None
     recipe: str | None = None
     favourite: bool = False
 
@@ -180,6 +189,27 @@ def create_app(
             return record
 
         return await store["dishes"].update(add)
+
+    @api.put("/dishes/{dish_id}", response_model=Dish)
+    async def replace_dish(
+        dish_id: str, body: DishIn, store: Store = Depends(get_store)
+    ) -> dict:
+        """Full replace: the stored Dish becomes exactly ``body`` (same id).
+
+        Any field the caller omits reverts to its default, so sending
+        ``recipe: null`` (or leaving it out) actually clears the recipe — there
+        is no partial-update merge.
+        """
+
+        def replace(dishes: list) -> dict:
+            for i, dish in enumerate(dishes):
+                if dish["id"] == dish_id:
+                    record = {"id": dish_id, **body.model_dump()}
+                    dishes[i] = record
+                    return record
+            raise HTTPException(status_code=404, detail="Dish not found")
+
+        return await store["dishes"].update(replace)
 
     @api.delete("/dishes/{dish_id}", status_code=204)
     async def delete_dish(

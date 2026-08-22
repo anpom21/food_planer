@@ -1,0 +1,270 @@
+:root {
+  --bg: #faf6f0;
+  --panel: #ffffff;
+  --ink: #2c2622;
+  --ink-soft: #6b625a;
+  --line: #e7dfd3;
+  --accent: #c1592b;
+  --favourite: #d98c1f;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(44, 38, 34, 0.06), 0 4px 14px rgba(44, 38, 34, 0.06);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.library {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 28px 32px 64px;
+}
+
+.muted {
+  color: var(--ink-soft);
+}
+
+.error {
+  color: #a83232;
+}
+
+.toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.toolbar h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+.toolbar p {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+/* Buttons ------------------------------------------------------------------ */
+.btn {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.btn:hover {
+  border-color: #d8cdbc;
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn.primary:hover {
+  background: #a84a22;
+}
+
+.btn.primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn.ghost {
+  background: transparent;
+}
+
+.btn.large {
+  padding: 14px 22px;
+  font-size: 16px;
+}
+
+/* Empty state -------------------------------------------------------------- */
+.empty-state {
+  display: flex;
+  justify-content: center;
+  padding: 80px 0;
+}
+
+/* Grid --------------------------------------------------------------------- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.card {
+  position: relative;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 16px 18px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.card:hover {
+  border-color: #d8cdbc;
+}
+
+.card-title {
+  margin: 0 24px 8px 0;
+  font-size: 16px;
+}
+
+.fav-label {
+  display: inline-block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--favourite);
+}
+
+.card-excerpt {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.card-delete {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.card-delete:hover {
+  background: #fbeaea;
+}
+
+.add-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  box-shadow: none;
+  color: var(--accent);
+  font-weight: 600;
+  min-height: 96px;
+}
+
+/* Modal editor ------------------------------------------------------------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(44, 38, 34, 0.35);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 60px 16px;
+  overflow-y: auto;
+}
+
+.modal {
+  background: var(--panel);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  width: 100%;
+  max-width: 480px;
+}
+
+.field {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.field-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.field-caption {
+  display: block;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+
+.input,
+.textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 14px;
+  background: #fff;
+}
+
+.textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.fav-toggle {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  margin-bottom: 16px;
+}
+
+.fav-toggle.on {
+  background: #fdf1de;
+  border-color: #f0d29a;
+  color: var(--favourite);
+  font-weight: 600;
+}
+
+.detail-toggle {
+  display: block;
+  width: 100%;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 13.5px;
+  cursor: pointer;
+  margin-bottom: 16px;
+}
+
+.detail {
+  margin-bottom: 8px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
