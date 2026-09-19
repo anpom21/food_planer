@@ -107,11 +107,14 @@ function ShopPicker({
   onChange: (shops: string[]) => void;
 }) {
   const [catalog, setCatalog] = useState<Shop[] | null>(null);
-  const catalogSlugs = new Set((catalog ?? []).map((s) => s.slug));
-
-  const others = shops.filter((s) => !catalogSlugs.has(s));
   const [otherOpen, setOtherOpen] = useState(false);
   const [otherText, setOtherText] = useState("");
+
+  // Split the stored shops against the catalog: known chains keep their pill
+  // selected, anything else is a free-text "other" entry.
+  const catalogSlugs = new Set((catalog ?? []).map((s) => s.slug));
+  const knownSelected = shops.filter((s) => catalogSlugs.has(s));
+  const others = shops.filter((s) => !catalogSlugs.has(s));
 
   useEffect(() => {
     listShops()
@@ -123,16 +126,13 @@ function ShopPicker({
   // state and the text field so re-opening the screen shows what's saved.
   useEffect(() => {
     if (catalog === null) return;
-    const stored = shops.filter((s) => !catalog.some((c) => c.slug === s));
-    if (stored.length) {
+    if (others.length) {
       setOtherOpen(true);
-      setOtherText(stored.join(", "));
+      setOtherText(others.join(", "));
     }
     // Only seed from the catalog arriving / profile switching, not on each keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog]);
-
-  const knownSelected = shops.filter((s) => catalogSlugs.has(s));
 
   const toggleChain = (slug: string) => {
     const next = shops.includes(slug)
