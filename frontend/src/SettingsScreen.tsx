@@ -77,6 +77,37 @@ export function Stepper({
   );
 }
 
+// The known-vs-unknown lean as a labelled slider. Shared by the Settings screen
+// and the per-run override modal so both render and write the bias identically.
+export function BiasSlider({
+  id,
+  value,
+  onChange,
+}: {
+  id: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div className="field">
+      <label htmlFor={id}>Known vs. unknown dishes</label>
+      <input
+        id={id}
+        type="range"
+        min={0}
+        max={1}
+        step={0.05}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      <div className="slider-labels">
+        <span>Mostly known</span>
+        <span>Mostly unknown</span>
+      </div>
+    </div>
+  );
+}
+
 // A chain with no logo file yet gets an automatic coloured-initial badge, so
 // the pill still reads at a glance. Colour is derived from the slug (stable per
 // chain); initials are the first two letters of the name.
@@ -294,24 +325,11 @@ export function SettingsScreen({
             onChange={(suggestionsPerDay) => patch({ suggestionsPerDay })}
           />
         </div>
-        <div className="field">
-          <label htmlFor="known-vs-unknown">Known vs. unknown dishes</label>
-          <input
-            id="known-vs-unknown"
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={draft.knownVsUnknownBias}
-            onChange={(e) =>
-              patch({ knownVsUnknownBias: Number(e.target.value) })
-            }
-          />
-          <div className="slider-labels">
-            <span>Mostly known</span>
-            <span>Mostly unknown</span>
-          </div>
-        </div>
+        <BiasSlider
+          id="known-vs-unknown"
+          value={draft.knownVsUnknownBias}
+          onChange={(knownVsUnknownBias) => patch({ knownVsUnknownBias })}
+        />
       </section>
 
       <section className="settings-card">

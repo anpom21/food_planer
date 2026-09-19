@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Stepper } from "./SettingsScreen";
+import { BiasSlider, Stepper } from "./SettingsScreen";
 import {
   listDishes,
   planWeek,
@@ -101,24 +101,13 @@ function OverrideModal({
             }
           />
         </div>
-        <div className="field">
-          <label htmlFor="override-bias">Known vs. unknown dishes</label>
-          <input
-            id="override-bias"
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={draft.knownVsUnknownBias}
-            onChange={(e) =>
-              onChange({ ...draft, knownVsUnknownBias: Number(e.target.value) })
-            }
-          />
-          <div className="slider-labels">
-            <span>Mostly known</span>
-            <span>Mostly unknown</span>
-          </div>
-        </div>
+        <BiasSlider
+          id="override-bias"
+          value={draft.knownVsUnknownBias}
+          onChange={(knownVsUnknownBias) =>
+            onChange({ ...draft, knownVsUnknownBias })
+          }
+        />
         <div className="modal-actions override-actions">
           <button
             type="button"
