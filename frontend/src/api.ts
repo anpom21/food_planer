@@ -36,6 +36,59 @@ export type Dish = {
 // The writable fields — everything a Dish is except its backend-assigned id.
 export type DishInput = Omit<Dish, "id">;
 
+// Planning a week (issue #23): one press → one structured LLM call → a whole
+// week, returned synchronously and persisted server-side.
+
+export type SuggestionIngredient = {
+  name: string;
+  quantity: string; // free text: "200 g", "1 pinch"
+};
+
+export type Discount = {
+  productName: string;
+  shop: string;
+  price: number;
+  originalPrice: number;
+  discountPercent: number;
+  validUntil: string;
+  matchedIngredient: string | null;
+};
+
+export type Suggestion = {
+  title: string;
+  description: string;
+  ingredients: SuggestionIngredient[];
+  estimatedCost: number; // DKK
+  prepTimeMinutes: number;
+  sourceDish: string | null; // a Dish id; null means an invented dish
+  discounts: Discount[];
+};
+
+export type DayPlan = {
+  day: number;
+  suggestions: Suggestion[];
+};
+
+export type PlanningRun = {
+  id: string;
+  createdAt: string;
+  profileId: string;
+  profileName: string;
+  status: "success" | "partial" | "failed";
+  days: DayPlan[];
+  dayCount: number;
+  dishIds: string[];
+  fridgeSnippet: string;
+  requestedDays: number | null;
+  requestedSuggestionsPerDay: number | null;
+};
+
+export type SettingsOverride = {
+  daysToPlan: number;
+  suggestionsPerDay: number;
+  knownVsUnknownBias: number;
+};
+
 async function json<T>(resp: Response): Promise<T> {
   if (!resp.ok) {
     const detail = await resp
@@ -104,6 +157,19 @@ export function replaceDish(id: string, input: DishInput): Promise<Dish> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   }).then((r) => json<Dish>(r));
+}
+
+// One press of "Plan my week" — the finished run comes back synchronously, so
+// there is nothing to poll. A failed run still returns 200 with its body.
+export function planWeek(
+  profileId: string,
+  settingsOverride?: SettingsOverride,
+): Promise<PlanningRun> {
+  return fetch("/api/planning-runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profileId, settingsOverride }),
+  }).then((r) => json<PlanningRun>(r));
 }
 
 export function deleteDish(id: string): Promise<void> {

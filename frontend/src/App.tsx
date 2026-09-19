@@ -13,6 +13,7 @@ import {
   type ProfileSummary,
 } from "./api";
 import { DishEditor } from "./DishEditor";
+import { PlanWeek } from "./PlanWeek";
 import { SettingsScreen } from "./SettingsScreen";
 import "./app.css";
 
@@ -270,14 +271,14 @@ function DishLibrary() {
   );
 }
 
-type Screen = "library" | "settings";
+type Screen = "plan" | "library" | "settings";
 
 export function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   // Shown when there's no current profile, or when "Add a profile" is picked.
   const [identifying, setIdentifying] = useState(false);
-  const [screen, setScreen] = useState<Screen>("library");
+  const [screen, setScreen] = useState<Screen>("plan");
 
   // Resolve the stored pointer on load.
   useEffect(() => {
@@ -336,6 +337,13 @@ export function App() {
       </p>
       <nav style={{ display: "flex", gap: "0.5rem" }}>
         <button
+          onClick={() => setScreen("plan")}
+          aria-current={screen === "plan"}
+          style={{ fontWeight: screen === "plan" ? 700 : 400 }}
+        >
+          Plan a week
+        </button>
+        <button
           onClick={() => setScreen("library")}
           aria-current={screen === "library"}
           style={{ fontWeight: screen === "library" ? 700 : 400 }}
@@ -350,9 +358,9 @@ export function App() {
           Settings
         </button>
       </nav>
-      {screen === "library" ? (
-        <DishLibrary />
-      ) : (
+      {screen === "plan" && <PlanWeek key={profile.id} profile={profile} />}
+      {screen === "library" && <DishLibrary />}
+      {screen === "settings" && (
         <SettingsScreen
           key={profile.id}
           profile={profile}

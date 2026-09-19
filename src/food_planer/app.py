@@ -13,6 +13,7 @@ no API versioning, no custom error envelope.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
@@ -25,8 +26,13 @@ from .clients import (
     RealTjekClient,
     TjekClient,
 )
+from .planning import compose_planning_prompt
 from .shopping_list import merge_shopping_list
 from .store import Store, new_id
+
+# A generous ceiling for the single planning call; hitting it triggers the
+# one truncation retry with days and suggestions-per-day halved.
+PLANNING_MAX_OUTPUT_TOKENS = 8000
 
 # Where data/ lives is resolved relative to the running process (the #12
 # provisional default): the repo root when launched from there.
@@ -122,6 +128,74 @@ class ShoppingItemIn(BaseModel):
 
 class RemoveItemsIn(BaseModel):
     lineIds: list[str]
+
+
+# --- PlanningRuns (issue #23) ----------------------------------------------
+
+
+class SettingsOverride(BaseModel):
+    """The just-for-this-run adjustment behind the settings chip.
+
+    Applied on top of the Profile's saved PlanningSettings for a single run and
+    never written back — the Profile's defaults survive untouched.
+    """
+
+    daysToPlan: int
+    suggestionsPerDay: int
+    knownVsUnknownBias: float
+
+
+class PlanningRunIn(BaseModel):
+    profileId: str
+    settingsOverride: SettingsOverride | None = None
+
+
+class SuggestionIngredient(BaseModel):
+    name: str
+    quantity: str  # free text: "200 g", "1 pinch"
+
+
+class Suggestion(BaseModel):
+    title: str
+    description: str
+    ingredients: list[SuggestionIngredient]
+    estimatedCost: float  # DKK
+    prepTimeMinutes: int
+    sourceDish: str | None  # a Dish id; null means an invented, unknown dish
+    # Denormalized offers; the discount ticket populates them, empty until then.
+    discounts: list[dict] = Field(default_factory=list)
+
+
+class DayPlan(BaseModel):
+    day: int
+    suggestions: list[Suggestion]
+
+
+class PlanningRun(BaseModel):
+    id: str
+    createdAt: str
+    profileId: str
+    profileName: str
+    status: str  # "success" | "partial" | "failed"
+    days: list[DayPlan]
+    dayCount: int
+    dishIds: list[str] = Field(default_factory=list)
+    fridgeSnippet: str = ""
+    # Carried only on a partial run, so the UI can't read a short week as full.
+    requestedDays: int | None = None
+    requestedSuggestionsPerDay: int | None = None
+
+
+class PlanningRunSummary(BaseModel):
+    """The archive row — no suggestions; that's the {id} read."""
+
+    id: str
+    createdAt: str
+    profileId: str
+    profileName: str
+    dayCount: int
+    status: str
+    fridgeSnippet: str = ""
 
 
 def _normalize_email(email: str) -> str:
@@ -313,6 +387,103 @@ def create_app(
 
         items = await store["shopping_list"].update(remove)
         return merge_shopping_list(items)
+
+    # --- PlanningRuns: one button, one pass, a whole week (issue #23) -------
+    # The whole week comes from a single structured LLM call so the model can
+    # avoid repeating a dish across days. The run is persisted regardless of
+    # outcome and returned synchronously — a dropped connection loses the wait,
+    # not the plan.
+
+    @api.post("/planning-runs", response_model=PlanningRun)
+    async def create_planning_run(
+        body: PlanningRunIn,
+        store: Store = Depends(get_store),
+        openai: OpenAIClient = Depends(get_openai_client),
+    ) -> dict:
+        profile = next(
+            (p for p in store["profiles"].read() if p["id"] == body.profileId),
+            None,
+        )
+        if profile is None:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        # The override lives on top of the saved settings for this run only; it
+        # is never persisted back onto the Profile.
+        settings = dict(profile["settings"])
+        if body.settingsOverride is not None:
+            settings.update(body.settingsOverride.model_dump())
+
+        dishes = store["dishes"].read()
+        requested_days = settings["daysToPlan"]
+        requested_per_day = settings["suggestionsPerDay"]
+
+        prompt = compose_planning_prompt(dishes, settings)
+        result = await openai.create_plan(
+            prompt=prompt, max_output_tokens=PLANNING_MAX_OUTPUT_TOKENS
+        )
+
+        status = "success"
+        output = None
+        if result.status == "completed":
+            output = result.output
+        elif result.status == "refused":
+            # A safety refusal fails immediately — no retry.
+            status = "failed"
+        elif result.status == "incomplete":
+            # Truncation: exactly one retry with days and per-day halved.
+            retry_settings = {
+                **settings,
+                "daysToPlan": max(1, requested_days // 2),
+                "suggestionsPerDay": max(1, requested_per_day // 2),
+            }
+            retry = await openai.create_plan(
+                prompt=compose_planning_prompt(dishes, retry_settings),
+                max_output_tokens=PLANNING_MAX_OUTPUT_TOKENS,
+            )
+            if retry.status == "completed":
+                status = "partial"
+                output = retry.output
+            else:
+                status = "failed"
+
+        days = (output or {}).get("days", [])
+        fridge_text = store["fridge_context"].read().get("text", "")
+        record = {
+            "id": new_id(),
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "profileId": profile["id"],
+            "profileName": profile["name"],
+            "status": status,
+            "days": days,
+            "dayCount": len(days),
+            "dishIds": [d["id"] for d in dishes],
+            "fridgeSnippet": fridge_text[:120],
+            # Only a partial run carries the ask alongside the actuals.
+            "requestedDays": requested_days if status == "partial" else None,
+            "requestedSuggestionsPerDay": (
+                requested_per_day if status == "partial" else None
+            ),
+        }
+
+        def add(runs: list) -> dict:
+            runs.append(record)
+            return record
+
+        return await store["planning_runs"].update(add)
+
+    @api.get("/planning-runs", response_model=list[PlanningRunSummary])
+    def list_planning_runs(store: Store = Depends(get_store)) -> list[dict]:
+        # The household-wide archive as summaries — no suggestions shipped here.
+        return store["planning_runs"].read()
+
+    @api.get("/planning-runs/{run_id}", response_model=PlanningRun)
+    def get_planning_run(
+        run_id: str, store: Store = Depends(get_store)
+    ) -> dict:
+        for run in store["planning_runs"].read():
+            if run["id"] == run_id:
+                return run
+        raise HTTPException(status_code=404, detail="Planning run not found")
 
     app.include_router(api)
 

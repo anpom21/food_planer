@@ -457,3 +457,144 @@ body {
   font-size: 13px;
   font-weight: 600;
 }
+
+/* Plan a Week (issue #23) -------------------------------------------------- */
+.plan-week {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 20px 24px 64px;
+  width: 100%;
+}
+
+/* Controls collapse into a top bar so they never crowd out the plan. */
+.plan-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 12px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.chip.known {
+  background: #eef6f0;
+  color: #2f7a43;
+  border-color: #cfe3d8;
+}
+.chip.unknown {
+  background: #eef0fa;
+  color: #3f4a8a;
+  border-color: #d8dcf0;
+}
+.chip.discount {
+  background: #fbeae6;
+  color: #a3341f;
+  border-color: #f0d3cc;
+}
+.settings-chip {
+  cursor: default;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  border-radius: var(--radius);
+  background: #fdf3e2;
+  border: 1px solid #f0dcb8;
+  font-size: 14px;
+}
+.banner.error {
+  background: #fbeae6;
+  border-color: #f0d3cc;
+}
+
+/* The plan owns the screen: horizontally-scrolling day columns. */
+.plan-board {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  align-items: flex-start;
+}
+
+.day-column {
+  flex: 0 0 260px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+}
+
+.day-head {
+  font-weight: 700;
+  font-size: 14px;
+  padding: 2px 4px 10px;
+}
+
+.day-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.sugg-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 12px;
+}
+
+.sugg-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.sugg-desc {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.sugg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.sugg-details {
+  width: 100%;
+}
+
+.sugg-provenance {
+  color: var(--ink-soft);
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+
+.ing-list {
+  margin: 6px 0 18px;
+  padding-left: 18px;
+}
+.ing-list li {
+  margin-bottom: 4px;
+}
+.ing-q {
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}

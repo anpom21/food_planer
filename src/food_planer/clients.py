@@ -46,13 +46,48 @@ class TjekClient(Protocol):
 
 
 class RealOpenAIClient:
-    """Placeholder for the hardcoded OpenAI client (built in a later ticket)."""
+    """The hardcoded OpenAI planner (issue #23).
+
+    One structured call per PlanningRun via the Responses API with
+    ``text.format`` set to a strict ``json_schema``; the model name comes from
+    config (:func:`food_planer.planning.resolve_model`). The SDK is imported
+    lazily so the app — and every test, which swaps in the fake — never needs
+    the ``openai`` package installed.
+    """
 
     async def create_plan(
         self, *, prompt: str, max_output_tokens: int
     ) -> LLMResult:
-        raise NotImplementedError(
-            "The OpenAI planning pipeline is not part of the walking skeleton."
+        from openai import AsyncOpenAI  # lazy: only the real path needs it
+
+        from .planning import planning_json_schema, resolve_model
+
+        client = AsyncOpenAI()
+        response = await client.responses.create(
+            model=resolve_model(),
+            input=prompt,
+            max_output_tokens=max_output_tokens,
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "weekly_plan",
+                    "strict": True,
+                    "schema": planning_json_schema(),
+                }
+            },
+        )
+        status = getattr(response, "status", "completed")
+        if status == "incomplete":
+            return LLMResult(status="incomplete")
+        # A refusal surfaces as a refusal content part rather than plain text.
+        for item in getattr(response, "output", []) or []:
+            for part in getattr(item, "content", []) or []:
+                if getattr(part, "type", None) == "refusal":
+                    return LLMResult(status="refused")
+        import json
+
+        return LLMResult(
+            status="completed", output=json.loads(response.output_text)
         )
 
 
@@ -89,11 +124,15 @@ class FakeOpenAIClient:
     behaviour: str = "success"
     canned: dict[str, Any] = field(default_factory=lambda: {"suggestions": []})
     calls: int = 0
+    prompts: list[str] = field(default_factory=list)
 
     async def create_plan(
         self, *, prompt: str, max_output_tokens: int
     ) -> LLMResult:
         self.calls += 1
+        # Record what the backend composed so prompt composition is assertable
+        # through the seam without reaching into internals.
+        self.prompts.append(prompt)
         if self.behaviour == "refuse":
             return LLMResult(status="refused")
         if self.behaviour == "truncate_twice":
