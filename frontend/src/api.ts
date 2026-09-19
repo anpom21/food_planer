@@ -190,6 +190,28 @@ export function planWeek(
   }).then((r) => json<PlanningRun>(r));
 }
 
+// One ingredient headed for the household ShoppingList (issue #29). `source`
+// carries the dish it came from (null for a hand-added item); the backend
+// generates the line id and merges rows on read, so nothing is returned here
+// that the Plan-a-week screen needs — selection is pure frontend state.
+export type ShoppingItemInput = {
+  name: string;
+  quantity: string;
+  source: { suggestionTitle: string; kind: "known" | "unknown" } | null;
+};
+
+// Post the reviewed ingredients as one array — a whole selection's worth of
+// ingredients is a single request, cleared client-side once it succeeds.
+export function addShoppingItems(items: ShoppingItemInput[]): Promise<void> {
+  return fetch("/api/shopping-list/items", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(items),
+  }).then((r) => {
+    if (!r.ok) throw new Error(r.statusText);
+  });
+}
+
 export function deleteDish(id: string): Promise<void> {
   return fetch(`/api/dishes/${id}`, { method: "DELETE" }).then((r) => {
     // The backend answers 204, but any 2xx counts as success (r.ok covers it).
