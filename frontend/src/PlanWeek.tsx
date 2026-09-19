@@ -144,11 +144,15 @@ const ingKey = (card: string, name: string) => `${card}::${name}`;
 
 const norm = (name: string) => name.toLowerCase().trim();
 
+// A duplicated ingredient's assigned tint (0–5, cycled) and how many selected
+// dishes want it.
+type Tint = { tint: number; count: number };
+
 // Ingredients wanted by more than one selected dish get a stable tint each (six
 // tints, cycled) plus an "in N dishes" label, so overlaps are obvious and the
 // redundant copies can be unticked. Keyed by the normalised ingredient name and
 // assigned in name order so the same duplicate always lands on the same tint.
-function tintMap(selected: Selected[]): Map<string, { tint: number; count: number }> {
+function tintMap(selected: Selected[]): Map<string, Tint> {
   const counts = new Map<string, number>();
   for (const s of selected) {
     for (const ing of s.suggestion.ingredients) {
@@ -156,7 +160,7 @@ function tintMap(selected: Selected[]): Map<string, { tint: number; count: numbe
       counts.set(k, (counts.get(k) ?? 0) + 1);
     }
   }
-  const map = new Map<string, { tint: number; count: number }>();
+  const map = new Map<string, Tint>();
   let n = 0;
   for (const k of [...counts.keys()].sort()) {
     const count = counts.get(k)!;
