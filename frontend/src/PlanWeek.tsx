@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
+import { Stepper } from "./SettingsScreen";
 import {
   listDishes,
   planWeek,
   type Dish,
   type PlanningRun,
   type Profile,
+  type SettingsOverride,
   type Suggestion,
 } from "./api";
 
@@ -14,10 +16,125 @@ import {
 // crowd out the plan: the "⚡ Plan my week" button and a chip summarising the
 // settings this run would use. One press fires a single structured LLM call
 // that returns the whole week at once, so no dish repeats across days.
+//
+// Issue #25 — Per-run settings override: the chip is a button that opens a
+// modal to bend days, suggestions-per-day and the known-vs-unknown lean for
+// *this run only*. The override is applied to one prompt and never written back
+// to the Profile, so planning a short week never means editing (and forgetting
+// to restore) your saved defaults.
 
-function settingsSummary(profile: Profile): string {
+// The three fields the profile carries that a per-run override can bend. The
+// chip and the modal both read the override when present, else the defaults.
+function defaultsOf(profile: Profile): SettingsOverride {
   const s = profile.settings;
-  return `${s.daysToPlan} days · ${s.suggestionsPerDay}/day`;
+  return {
+    daysToPlan: s.daysToPlan,
+    suggestionsPerDay: s.suggestionsPerDay,
+    knownVsUnknownBias: s.knownVsUnknownBias,
+  };
+}
+
+function sameAsDefaults(a: SettingsOverride, b: SettingsOverride): boolean {
+  return (
+    a.daysToPlan === b.daysToPlan &&
+    a.suggestionsPerDay === b.suggestionsPerDay &&
+    a.knownVsUnknownBias === b.knownVsUnknownBias
+  );
+}
+
+function biasWord(bias: number): string {
+  if (bias <= 0.34) return "mostly known";
+  if (bias >= 0.66) return "mostly new";
+  return "a mix";
+}
+
+function settingsSummary(s: SettingsOverride): string {
+  return `${s.daysToPlan} days · ${s.suggestionsPerDay}/day · ${biasWord(
+    s.knownVsUnknownBias,
+  )}`;
+}
+
+// The just-for-this-run modal behind the settings chip. It is unmistakably
+// labelled as a per-run override and carries a "Reset to my defaults" link, so
+// nobody is ever left wondering whether they have changed their saved settings.
+function OverrideModal({
+  draft,
+  defaults,
+  onChange,
+  onReset,
+  onClose,
+}: {
+  draft: SettingsOverride;
+  defaults: SettingsOverride;
+  onChange: (draft: SettingsOverride) => void;
+  onReset: () => void;
+  onClose: () => void;
+}) {
+  const isOverridden = !sameAsDefaults(draft, defaults);
+  return (
+    <div
+      className="modal-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="modal override-modal">
+        <h2>Plan this week with…</h2>
+        <p className="override-note">
+          🕐 Just for this run — your saved defaults stay untouched.
+        </p>
+        <div className="row">
+          <Stepper
+            label="Days to plan"
+            value={draft.daysToPlan}
+            min={1}
+            max={14}
+            onChange={(daysToPlan) => onChange({ ...draft, daysToPlan })}
+          />
+          <Stepper
+            label="Suggestions / day"
+            value={draft.suggestionsPerDay}
+            min={1}
+            max={10}
+            onChange={(suggestionsPerDay) =>
+              onChange({ ...draft, suggestionsPerDay })
+            }
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="override-bias">Known vs. unknown dishes</label>
+          <input
+            id="override-bias"
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={draft.knownVsUnknownBias}
+            onChange={(e) =>
+              onChange({ ...draft, knownVsUnknownBias: Number(e.target.value) })
+            }
+          />
+          <div className="slider-labels">
+            <span>Mostly known</span>
+            <span>Mostly unknown</span>
+          </div>
+        </div>
+        <div className="modal-actions override-actions">
+          <button
+            type="button"
+            className="link-btn"
+            onClick={onReset}
+            disabled={!isOverridden}
+          >
+            Reset to my defaults
+          </button>
+          <button className="btn primary" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // A known dish names the library entry it came from; an invented one is "New
@@ -111,6 +228,9 @@ export function PlanWeek({ profile }: { profile: Profile }) {
   const [error, setError] = useState<string | null>(null);
   // A suggestion open in the Details modal, or null when it's closed.
   const [details, setDetails] = useState<Suggestion | null>(null);
+  // The just-for-this-run override, or null when this run uses the defaults.
+  const [override, setOverride] = useState<SettingsOverride | null>(null);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     listDishes()
@@ -118,13 +238,31 @@ export function PlanWeek({ profile }: { profile: Profile }) {
       .catch(() => setDishes([]));
   }, []);
 
+  // Switching profiles resets any pending override — it belonged to the person
+  // who was on screen, not the one now selected.
+  useEffect(() => {
+    setOverride(null);
+    setEditing(false);
+  }, [profile.id]);
+
   const dishesById = new Map(dishes.map((d) => [d.id, d]));
+
+  // What the next run will actually be planned against: the override when set,
+  // otherwise the Profile's saved defaults.
+  const defaults = defaultsOf(profile);
+  const effective = override ?? defaults;
+
+  // The modal edits a draft in place; storing null when it matches the defaults
+  // keeps the chip honest (no "this run" flag when nothing is actually bent).
+  function applyDraft(draft: SettingsOverride) {
+    setOverride(sameAsDefaults(draft, defaults) ? null : draft);
+  }
 
   async function handlePlan() {
     setPlanning(true);
     setError(null);
     try {
-      setRun(await planWeek(profile.id));
+      setRun(await planWeek(profile.id, override ?? undefined));
     } catch (e: unknown) {
       setError(String(e));
     } finally {
@@ -142,10 +280,27 @@ export function PlanWeek({ profile }: { profile: Profile }) {
         >
           {planning ? "Asking the model…" : "⚡ Plan my week"}
         </button>
-        <span className="chip settings-chip" title="This run's settings">
-          ⚙ {settingsSummary(profile)}
-        </span>
+        <button
+          className={
+            override ? "chip settings-chip overridden" : "chip settings-chip"
+          }
+          title="Adjust the settings for this run"
+          onClick={() => setEditing(true)}
+        >
+          ⚙ {settingsSummary(effective)}
+          {override && <span className="chip-flag"> · this run</span>}
+        </button>
       </div>
+
+      {editing && (
+        <OverrideModal
+          draft={effective}
+          defaults={defaults}
+          onChange={applyDraft}
+          onReset={() => setOverride(null)}
+          onClose={() => setEditing(false)}
+        />
+      )}
 
       {error && <p className="error">Could not plan: {error}</p>}
 

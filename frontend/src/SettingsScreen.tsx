@@ -31,7 +31,7 @@ const PRIORITY_LABELS: Record<string, string> = {
 
 // A narrow number box with − and + buttons inside one bordered pill, rather
 // than the native browser spinner, which is miserable on a tablet.
-function Stepper({
+export function Stepper({
   label,
   value,
   min,

@@ -187,6 +187,31 @@ def test_settings_override_does_not_mutate_the_profile(client, fake_openai) -> N
     assert saved["knownVsUnknownBias"] == 0.5
 
 
+def test_settings_override_drives_the_planned_prompt(client, fake_openai) -> None:
+    # AC #4 (issue #25): a run with settingsOverride plans against the
+    # overridden values, not the Profile's saved defaults.
+    fake_openai.canned = _canned_week()
+    profile_id = _make_profile(client)
+
+    client.post(
+        "/api/planning-runs",
+        json={
+            "profileId": profile_id,
+            "settingsOverride": {
+                "daysToPlan": 4,
+                "suggestionsPerDay": 3,
+                "knownVsUnknownBias": 0.9,
+            },
+        },
+    )
+
+    prompt = fake_openai.prompts[-1]
+    # The default is 7 days × 2/day; the override's numbers are what got planned.
+    assert "Plan exactly 4 day(s), with 3 dinner suggestion(s) per day." in prompt
+    # bias 0.9 renders the "lean toward new dishes" prose, not the balanced one.
+    assert "Lean toward new dishes" in prompt
+
+
 def test_unknown_profile_is_a_404(client) -> None:
     resp = client.post("/api/planning-runs", json={"profileId": "nope"})
     assert resp.status_code == 404

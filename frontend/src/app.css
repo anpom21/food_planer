@@ -503,7 +503,57 @@ body {
   border-color: #f0d3cc;
 }
 .settings-chip {
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.settings-chip:hover {
+  border-color: var(--accent, #b8894a);
+}
+.settings-chip.overridden {
+  background: #f3eefa;
+  color: #4a3f8a;
+  border-color: #ddd3f0;
+}
+.chip-flag {
+  font-weight: 600;
+}
+
+/* Per-run override modal (issue #25) -------------------------------------- */
+.override-modal .row {
+  display: flex;
+  gap: 16px;
+}
+.override-note {
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #f3eefa;
+  color: #4a3f8a;
+  font-size: 13px;
+  border: 1px solid #ddd3f0;
+}
+.override-actions {
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 20px;
+}
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--accent, #b8894a);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.link-btn:disabled {
+  color: var(--ink-soft);
+  text-decoration: none;
   cursor: default;
+  opacity: 0.6;
 }
 
 .banner {
