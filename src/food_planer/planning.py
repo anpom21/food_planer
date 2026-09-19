@@ -9,6 +9,7 @@ functions callable on their own.
 
 from __future__ import annotations
 
+import copy
 import os
 from typing import Any
 
@@ -106,8 +107,6 @@ _PLAN = {
 
 def planning_json_schema() -> dict[str, Any]:
     """The root schema — an object with a nested ``days`` array, strict-clean."""
-    import copy
-
     return copy.deepcopy(_PLAN)
 
 

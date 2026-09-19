@@ -12,6 +12,7 @@ ticket.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -84,8 +85,6 @@ class RealOpenAIClient:
             for part in getattr(item, "content", []) or []:
                 if getattr(part, "type", None) == "refusal":
                     return LLMResult(status="refused")
-        import json
-
         return LLMResult(
             status="completed", output=json.loads(response.output_text)
         )
