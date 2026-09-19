@@ -1,0 +1,29 @@
+{
+  "name": "food_planer",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "sandcastle": "tsx .sandcastle/main.mts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anpom21/food_planer.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/anpom21/food_planer/issues"
+  },
+  "homepage": "https://github.com/anpom21/food_planer#readme",
+  "devDependencies": {
+    "@ai-hero/sandcastle": "^0.12.0",
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  }
+}

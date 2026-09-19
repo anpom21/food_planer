@@ -1,5 +1,12 @@
-import { useState } from "react";
-import { saveSettings, type PlanningSettings, type Profile } from "./api";
+import { useEffect, useState } from "react";
+import {
+  listShops,
+  saveSettings,
+  shopIconUrl,
+  type PlanningSettings,
+  type Profile,
+  type Shop,
+} from "./api";
 
 // Issue #19 — the per-Profile Settings screen. The settled behavioural
 // reference is the prototype's recommended variant (prototype/settings-screen,
@@ -67,6 +74,150 @@ function Stepper({
         </button>
       </div>
     </div>
+  );
+}
+
+// A chain with no logo file yet gets an automatic coloured-initial badge, so
+// the pill still reads at a glance. Colour is derived from the slug (stable per
+// chain); initials are the first two letters of the name.
+function badgeColour(slug: string): string {
+  let hue = 0;
+  for (let i = 0; i < slug.length; i++) hue = (hue * 31 + slug.charCodeAt(i)) % 360;
+  return `hsl(${hue}, 52%, 42%)`;
+}
+
+function initials(name: string): string {
+  const letters = name.replace(/[^A-Za-z]/g, "");
+  return (letters.slice(0, 2) || name.slice(0, 2)).toUpperCase();
+}
+
+// The preferred-shops picker (issue #32/#33/#34): a full-width card of pills
+// over the fixed Danish-chain list, each carrying its logo (or a coloured
+// initial when hasIcon is false — no failed image request), plus an "Other…"
+// pill revealing a free-text field so an unlisted local shop isn't locked out.
+//
+// Selected shops live in settings.shops as a flat list: catalog slugs for the
+// known chains, plus whatever free text was typed under "Other…". Anything in
+// the list that isn't a catalog slug is an "other" entry.
+function ShopPicker({
+  shops,
+  onChange,
+}: {
+  shops: string[];
+  onChange: (shops: string[]) => void;
+}) {
+  const [catalog, setCatalog] = useState<Shop[] | null>(null);
+  const [otherOpen, setOtherOpen] = useState(false);
+  const [otherText, setOtherText] = useState("");
+
+  // Split the stored shops against the catalog: known chains keep their pill
+  // selected, anything else is a free-text "other" entry.
+  const catalogSlugs = new Set((catalog ?? []).map((s) => s.slug));
+  const knownSelected = shops.filter((s) => catalogSlugs.has(s));
+  const others = shops.filter((s) => !catalogSlugs.has(s));
+
+  useEffect(() => {
+    listShops()
+      .then(setCatalog)
+      .catch(() => setCatalog([]));
+  }, []);
+
+  // Once the catalog is known, reflect any stored "other" entries into the open
+  // state and the text field so re-opening the screen shows what's saved.
+  useEffect(() => {
+    if (catalog === null) return;
+    if (others.length) {
+      setOtherOpen(true);
+      setOtherText(others.join(", "));
+    }
+    // Only seed from the catalog arriving / profile switching, not on each keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalog]);
+
+  const toggleChain = (slug: string) => {
+    const next = shops.includes(slug)
+      ? shops.filter((s) => s !== slug)
+      : [...shops, slug];
+    onChange(next);
+  };
+
+  const applyOther = (text: string) => {
+    setOtherText(text);
+    const parsed = text
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    onChange([...knownSelected, ...parsed]);
+  };
+
+  const toggleOther = () => {
+    if (otherOpen) {
+      setOtherOpen(false);
+      setOtherText("");
+      onChange(knownSelected); // drop any free-text entries
+    } else {
+      setOtherOpen(true);
+    }
+  };
+
+  const otherSelected = otherOpen || others.length > 0;
+
+  return (
+    <section className="settings-card">
+      <label>
+        Preferred shops{" "}
+        <span className="hint">— pick the chains you actually shop at</span>
+      </label>
+      <div className="pill-grid">
+        {(catalog ?? []).map((shop) => {
+          const selected = shops.includes(shop.slug);
+          return (
+            <button
+              type="button"
+              key={shop.slug}
+              className={selected ? "shop-pill selected" : "shop-pill"}
+              aria-pressed={selected}
+              onClick={() => toggleChain(shop.slug)}
+            >
+              {shop.hasIcon ? (
+                <img
+                  className="shop-logo"
+                  src={shopIconUrl(shop.slug)}
+                  alt=""
+                  aria-hidden="true"
+                />
+              ) : (
+                <span
+                  className="shop-badge"
+                  aria-hidden="true"
+                  style={{ background: badgeColour(shop.slug) }}
+                >
+                  {initials(shop.name)}
+                </span>
+              )}
+              {shop.name}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          className={otherSelected ? "shop-pill selected" : "shop-pill"}
+          aria-pressed={otherSelected}
+          onClick={toggleOther}
+        >
+          Other…
+        </button>
+      </div>
+      {otherSelected && (
+        <input
+          className="other-shop-input"
+          type="text"
+          placeholder="e.g. the corner grocer (comma-separated)"
+          value={otherText}
+          onChange={(e) => applyOther(e.target.value)}
+        />
+      )}
+    </section>
   );
 }
 
@@ -193,6 +344,11 @@ export function SettingsScreen({
           ))}
         </ul>
       </section>
+
+      <ShopPicker
+        shops={draft.shops}
+        onChange={(shops) => patch({ shops })}
+      />
 
       <section className="settings-card">
         <label htmlFor="inspiration">

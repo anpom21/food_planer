@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -28,6 +29,7 @@ from .clients import (
 )
 from .planning import compose_planning_prompt
 from .shopping_list import merge_shopping_list
+from .shops import icon_path, shop_catalog
 from .store import Store, new_id
 
 # A generous ceiling for the single planning call; hitting it triggers the
@@ -196,6 +198,14 @@ class PlanningRunSummary(BaseModel):
     dayCount: int
     status: str
     fridgeSnippet: str = ""
+
+
+class Shop(BaseModel):
+    """One row of the backend-owned Danish-chain catalog (issue #20)."""
+
+    slug: str
+    name: str
+    hasIcon: bool
 
 
 def _normalize_email(email: str) -> str:
@@ -484,6 +494,23 @@ def create_app(
             if run["id"] == run_id:
                 return run
         raise HTTPException(status_code=404, detail="Planning run not found")
+
+    # --- Shops: the fixed Danish-chain catalog and its logos (issue #20) -----
+    # Backend-owned so the discount fetcher and the pill picker share one
+    # canonical slug↔chain mapping. Logos live under data/icons/<slug>.<ext>.
+
+    @api.get("/shops", response_model=list[Shop])
+    def list_shops(store: Store = Depends(get_store)) -> list[dict]:
+        return shop_catalog(store.data_dir / "icons")
+
+    @api.get("/shops/{slug}/icon")
+    def get_shop_icon(
+        slug: str, store: Store = Depends(get_store)
+    ) -> FileResponse:
+        path = icon_path(store.data_dir / "icons", slug)
+        if path is None:
+            raise HTTPException(status_code=404, detail="Shop icon not found")
+        return FileResponse(path)
 
     app.include_router(api)
 
