@@ -36,6 +36,14 @@ export type Dish = {
 // The writable fields — everything a Dish is except its backend-assigned id.
 export type DishInput = Omit<Dish, "id">;
 
+// A row of the backend-owned Danish-chain catalog (issue #20). `hasIcon` lets a
+// pill choose the coloured-initial fallback without a failed image request.
+export type Shop = {
+  slug: string;
+  name: string;
+  hasIcon: boolean;
+};
+
 async function json<T>(resp: Response): Promise<T> {
   if (!resp.ok) {
     const detail = await resp
@@ -82,6 +90,16 @@ export function saveSettings(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(settings),
   }).then((r) => json<Profile>(r));
+}
+
+// The fixed Danish-chain catalog for the preferred-shops picker (issue #20).
+export function listShops(): Promise<Shop[]> {
+  return fetch("/api/shops").then((r) => json<Shop[]>(r));
+}
+
+// The URL a pill's logo loads from — only issued when the shop hasIcon.
+export function shopIconUrl(slug: string): string {
+  return `/api/shops/${encodeURIComponent(slug)}/icon`;
 }
 
 export function listDishes(): Promise<Dish[]> {

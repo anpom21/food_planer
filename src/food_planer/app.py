@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -26,6 +27,7 @@ from .clients import (
     TjekClient,
 )
 from .shopping_list import merge_shopping_list
+from .shops import icon_path, shop_catalog
 from .store import Store, new_id
 
 # Where data/ lives is resolved relative to the running process (the #12
@@ -122,6 +124,14 @@ class ShoppingItemIn(BaseModel):
 
 class RemoveItemsIn(BaseModel):
     lineIds: list[str]
+
+
+class Shop(BaseModel):
+    """One row of the backend-owned Danish-chain catalog (issue #20)."""
+
+    slug: str
+    name: str
+    hasIcon: bool
 
 
 def _normalize_email(email: str) -> str:
@@ -313,6 +323,23 @@ def create_app(
 
         items = await store["shopping_list"].update(remove)
         return merge_shopping_list(items)
+
+    # --- Shops: the fixed Danish-chain catalog and its logos (issue #20) -----
+    # Backend-owned so the discount fetcher and the pill picker share one
+    # canonical slug↔chain mapping. Logos live under data/icons/<slug>.<ext>.
+
+    @api.get("/shops", response_model=list[Shop])
+    def list_shops(store: Store = Depends(get_store)) -> list[dict]:
+        return shop_catalog(store.data_dir / "icons")
+
+    @api.get("/shops/{slug}/icon")
+    def get_shop_icon(
+        slug: str, store: Store = Depends(get_store)
+    ) -> FileResponse:
+        path = icon_path(store.data_dir / "icons", slug)
+        if path is None:
+            raise HTTPException(status_code=404, detail="Shop icon not found")
+        return FileResponse(path)
 
     app.include_router(api)
 
