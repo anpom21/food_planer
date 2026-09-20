@@ -649,6 +649,172 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Card selection + ingredient review (issue #29) -------------------------- */
+.sugg-card.selectable {
+  cursor: pointer;
+  position: relative;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.sugg-card.selectable:hover {
+  border-color: #d8cdbc;
+}
+.sugg-card.selectable.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(193, 89, 43, 0.18);
+}
+
+/* Filled green check circle on the card's top-right corner. */
+.selmark {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #2e9e5b;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+/* Bottom action bar — visible only while something is selected. */
+.select-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 850;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -3px 14px rgba(44, 38, 34, 0.08);
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.select-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.modal.wide {
+  max-width: 680px;
+  max-height: 78vh;
+  display: flex;
+  flex-direction: column;
+}
+.review-sub {
+  color: var(--ink-soft);
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+.review-shortcuts {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.review-scroll {
+  overflow: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+
+.ing-group {
+  margin-bottom: 14px;
+}
+.ing-group-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ing-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  cursor: pointer;
+  margin-bottom: 3px;
+}
+.ing-row:hover {
+  background: var(--bg);
+}
+.ing-row-q {
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  min-width: 62px;
+}
+.ing-row-dup {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.8;
+}
+/* Unticking greys and strikes the row in place — it never leaves the list. */
+.ing-row.off {
+  opacity: 0.45;
+}
+.ing-row.off .ing-row-nm {
+  text-decoration: line-through;
+}
+
+/* Six tints, one per distinct duplicated ingredient. */
+.tint-0 {
+  background: #fdeee6;
+  border-color: #f3d6c6;
+}
+.tint-1 {
+  background: #e7f1fb;
+  border-color: #cfe0f2;
+}
+.tint-2 {
+  background: #eaf6ea;
+  border-color: #cce6cc;
+}
+.tint-3 {
+  background: #f6ecfa;
+  border-color: #e3d0ee;
+}
+.tint-4 {
+  background: #fdf6dc;
+  border-color: #eee0b0;
+}
+.tint-5 {
+  background: #e6f5f6;
+  border-color: #c8e5e8;
+}
+
+.toast {
+  position: fixed;
+  bottom: 86px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 990;
+  background: #2e9e5b;
+  color: #fff;
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
 /* Preferred-shops pill picker (issue #20) --------------------------------- */
 .pill-grid {
   display: flex;
