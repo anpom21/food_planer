@@ -198,7 +198,43 @@ export type ShoppingItemInput = {
   name: string;
   quantity: string;
   source: { suggestionTitle: string; kind: "known" | "unknown" } | null;
+  // A free-text note carried by a hand-added item; surfaces in the CSV Notes
+  // column for rows that have no dish behind them.
+  note?: string;
 };
+
+// A merged ShoppingList row as the backend folds it (issue #22/#29): one row
+// per ingredient, the total summed across every dish, each dish's share on its
+// source entry. `dishTitle`/`kind` are null for a hand-added contribution.
+export type ShoppingRow = {
+  name: string;
+  totalQuantity: string;
+  sources: {
+    dishTitle: string | null;
+    kind: "known" | "unknown" | null;
+    share: string;
+  }[];
+  lineIds: string[];
+  note: string;
+};
+
+export function getShoppingList(): Promise<ShoppingRow[]> {
+  return fetch("/api/shopping-list").then((r) => json<ShoppingRow[]>(r));
+}
+
+// The plain-text export the Copy-list modal previews. The backend owns the
+// formatting (totals, per-dish shares in brackets) so it stays consistent with
+// the CSV and is unit-tested behind the seam.
+export function getShoppingListText(): Promise<string> {
+  return fetch("/api/shopping-list/export.txt").then((r) => {
+    if (!r.ok) throw new Error(r.statusText);
+    return r.text();
+  });
+}
+
+// The CSV download URL. Served with a UTF-8 BOM and a Content-Disposition so a
+// plain anchor download writes shopping-list.csv and Excel reads æ/ø/å back.
+export const SHOPPING_LIST_CSV_URL = "/api/shopping-list/export.csv";
 
 // Post the reviewed ingredients as one array — a whole selection's worth of
 // ingredients is a single request, cleared client-side once it succeeds.

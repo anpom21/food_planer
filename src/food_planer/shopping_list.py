@@ -22,6 +22,8 @@ summed is joined.
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 from typing import Any
 
@@ -100,11 +102,20 @@ def _build_row(name: str, lines: list[dict[str, Any]]) -> dict[str, Any]:
                 }
             )
 
+    # A hand-added line can carry a free-text note ("we're just out"); it rides
+    # to the export's Notes column for rows that have no dish behind them.
+    notes = [
+        (line.get("note") or "").strip()
+        for line in lines
+        if line.get("source") is None and (line.get("note") or "").strip()
+    ]
+
     return {
         "name": name,
         "totalQuantity": _join_total(parsed),
         "sources": sources,
         "lineIds": line_ids,
+        "note": "; ".join(notes),
     }
 
 
@@ -126,3 +137,70 @@ def merge_shopping_list(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         groups[key]["lines"].append(line)
 
     return [_build_row(groups[key]["name"], groups[key]["lines"]) for key in order]
+
+
+# --- Export: the two ways the list leaves the app (issue #30) ---------------
+# Both work on a plain-HTTP home network (no ``navigator.share``, which needs
+# HTTPS): plain text to paste into a chat, and a shopping-list.csv download.
+# The formatting lives here, behind the seam, so per-dish shares in brackets,
+# CSV quoting and the UTF-8 BOM are unit-testable without a browser.
+
+_TEXT_HEADER = "Shopping list — Food Planner"
+
+
+def _dish_sources(row: dict[str, Any]) -> list[dict[str, Any]]:
+    """The row's dish-backed source entries; hand-added lines are excluded."""
+    return [s for s in row["sources"] if s.get("dishTitle")]
+
+
+def shopping_list_text(rows: list[dict[str, Any]]) -> str:
+    """Render merged rows as the plain text pasted into a messaging app.
+
+    Each outstanding row shows its summed total; a row wanted by more than one
+    dish also spells out each dish's share in brackets, since the headline
+    amount alone hides where the total came from.
+    """
+    lines = [_TEXT_HEADER, ""]
+    for row in rows:
+        dishes = _dish_sources(row)
+        total = (row.get("totalQuantity") or "").strip()
+        line = f"[ ] {row['name']}"
+        if total:
+            line += f" — {total}"
+        if len(dishes) > 1:
+            shares = ", ".join(f"{s['dishTitle']} {s['share']}" for s in dishes)
+            line += f" ({shares})"
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+def _notes_for(row: dict[str, Any]) -> str:
+    """The Notes cell: provenance for dish rows, the hand-written note otherwise.
+
+    One note per dish, joined with ``;``. A shared ingredient's note carries
+    that dish's share (Quantity holds only the total); a single-dish row needs
+    no share, so the note is just the dish name.
+    """
+    dishes = _dish_sources(row)
+    if dishes:
+        if len(dishes) > 1:
+            return "; ".join(f"{s['dishTitle']} {s['share']}" for s in dishes)
+        return dishes[0]["dishTitle"]
+    return (row.get("note") or "").strip()
+
+
+def shopping_list_csv(rows: list[dict[str, Any]]) -> str:
+    """Render merged rows as CSV — ``Ingredient, Quantity, Notes``.
+
+    One row per outstanding ingredient, standard RFC-4180 quoting (the ``csv``
+    module handles commas and quotes), prefixed with a UTF-8 BOM so Excel reads
+    æ/ø/å back correctly.
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["Ingredient", "Quantity", "Notes"])
+    for row in rows:
+        writer.writerow(
+            [row["name"], (row.get("totalQuantity") or "").strip(), _notes_for(row)]
+        )
+    return "﻿" + buffer.getvalue()

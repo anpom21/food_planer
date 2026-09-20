@@ -884,3 +884,54 @@ body {
   font-size: 14px;
   background: #fff;
 }
+
+/* --- Shopping list export (issue #30) ------------------------------------ */
+.shopping-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-width: 640px;
+}
+.shopping-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.shopping-name {
+  font-weight: 600;
+}
+.shopping-total {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+.shopping-chips {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.export-preview {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  background: #fff;
+  resize: vertical;
+}
+/* A disabled anchor-styled button (the CSV download link when the list is
+   empty) — mirrors .btn.primary:disabled, which only matches <button>. */
+.btn.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}

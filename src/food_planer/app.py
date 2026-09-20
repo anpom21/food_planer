@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -28,7 +28,11 @@ from .clients import (
     TjekClient,
 )
 from .planning import compose_planning_prompt
-from .shopping_list import merge_shopping_list
+from .shopping_list import (
+    merge_shopping_list,
+    shopping_list_csv,
+    shopping_list_text,
+)
 from .shops import icon_path, shop_catalog
 from .store import Store, new_id
 
@@ -126,6 +130,9 @@ class ShoppingItemIn(BaseModel):
     name: str = Field(min_length=1)
     quantity: str = ""
     source: ShoppingSource | None = None
+    # A free-text note for a hand-added item ("we're just out") — it rides to
+    # the CSV export's Notes column for rows that have no dish behind them.
+    note: str = ""
 
 
 class RemoveItemsIn(BaseModel):
@@ -370,6 +377,7 @@ def create_app(
                 "name": item.name,
                 "quantity": item.quantity,
                 "source": item.source.model_dump() if item.source else None,
+                "note": item.note,
             }
             for item in body
         ]
@@ -397,6 +405,29 @@ def create_app(
 
         items = await store["shopping_list"].update(remove)
         return merge_shopping_list(items)
+
+    # --- Export (issue #30): text to copy, CSV to download ------------------
+    # Both formats are generated in the pure ``shopping_list_*`` functions so
+    # their fiddly bits (per-dish shares in brackets, CSV quoting, the UTF-8
+    # BOM) are testable behind the seam. ``navigator.share`` is deliberately
+    # absent — it needs HTTPS, which a plain-HTTP home install doesn't have.
+
+    def _rows(store: Store) -> list[dict]:
+        return merge_shopping_list(store["shopping_list"].read()["items"])
+
+    @api.get("/shopping-list/export.txt")
+    def export_shopping_list_text(store: Store = Depends(get_store)) -> PlainTextResponse:
+        return PlainTextResponse(shopping_list_text(_rows(store)))
+
+    @api.get("/shopping-list/export.csv")
+    def export_shopping_list_csv(store: Store = Depends(get_store)) -> Response:
+        return Response(
+            content=shopping_list_csv(_rows(store)),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="shopping-list.csv"'
+            },
+        )
 
     # --- PlanningRuns: one button, one pass, a whole week (issue #23) -------
     # The whole week comes from a single structured LLM call so the model can

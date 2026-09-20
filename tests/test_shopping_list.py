@@ -12,6 +12,8 @@ function exercised behind ``/api/shopping-list`` (spec.md → "ShoppingList" and
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 from pathlib import Path
 
@@ -159,3 +161,85 @@ def test_shopping_list_json_has_no_ticked_field(client, data_dir: Path) -> None:
     stored = json.loads(raw)
     for item in stored["items"]:
         assert "ticked" not in item
+
+
+# --- Export: text (Copy list) and CSV (issue #30) --------------------------
+# The list leaves the app two ways that work on a plain-HTTP home network: a
+# plain-text preview to paste into a chat, and a shopping-list.csv download.
+# Both are generated behind the seam so their fiddly bits — per-dish shares in
+# brackets, CSV quoting, the UTF-8 BOM — are unit-testable without a browser.
+
+
+def test_text_export_shows_total_with_per_dish_shares_in_brackets(client) -> None:
+    _add(
+        client,
+        [
+            {"name": "Onions", "quantity": "2", "source": {"suggestionTitle": "Chili con carne", "kind": "known"}},
+            {"name": "Onions", "quantity": "2", "source": {"suggestionTitle": "Lasagne", "kind": "known"}},
+            {"name": "Onions", "quantity": "1", "source": {"suggestionTitle": "Frikadeller", "kind": "known"}},
+            {"name": "Minced beef", "quantity": "500 g", "source": {"suggestionTitle": "Chili con carne", "kind": "known"}},
+        ],
+    )
+    text = client.get("/api/shopping-list/export.txt").text
+    # A shared ingredient carries its total and each dish's share in brackets.
+    assert "Onions — 5 (Chili con carne 2, Lasagne 2, Frikadeller 1)" in text
+    # A single-dish ingredient shows its total but no bracketed breakdown.
+    assert "Minced beef — 500 g" in text
+    assert "Minced beef — 500 g (" not in text
+
+
+def test_csv_export_has_exactly_the_three_columns_and_provenance_notes(client) -> None:
+    _add(
+        client,
+        [
+            {"name": "Potatoes", "quantity": "800 g", "source": {"suggestionTitle": "Frikadeller", "kind": "known"}},
+            {"name": "Potatoes", "quantity": "400 g", "source": {"suggestionTitle": "Miso-glazed salmon", "kind": "unknown"}},
+            {"name": "Minced beef", "quantity": "500 g", "source": {"suggestionTitle": "Chili con carne", "kind": "known"}},
+        ],
+    )
+    body = client.get("/api/shopping-list/export.csv").text
+    rows = list(csv.reader(io.StringIO(body.lstrip("﻿"))))
+    assert rows[0] == ["Ingredient", "Quantity", "Notes"]
+    parsed = {r[0]: r for r in rows[1:]}
+    # Shared: one note per dish joined with "; ", each carrying that dish's share.
+    assert parsed["Potatoes"] == [
+        "Potatoes",
+        "1200 g",
+        "Frikadeller 800; Miso-glazed salmon 400",
+    ]
+    # Single dish: the note is just the dish name, since Quantity already holds it.
+    assert parsed["Minced beef"] == ["Minced beef", "500 g", "Chili con carne"]
+
+
+def test_csv_export_hand_added_item_carries_its_own_note(client) -> None:
+    _add(client, [{"name": "Coffee", "quantity": "500 g", "source": None, "note": "we're just out"}])
+    body = client.get("/api/shopping-list/export.csv").text
+    rows = {r[0]: r for r in csv.reader(io.StringIO(body.lstrip("﻿")))}
+    assert rows["Coffee"] == ["Coffee", "500 g", "we're just out"]
+
+
+def test_csv_export_quotes_fields_containing_commas_or_quotes(client) -> None:
+    _add(
+        client,
+        [
+            {"name": "Beans", "quantity": "1 can", "source": {"suggestionTitle": 'Chili, "hot"', "kind": "known"}},
+        ],
+    )
+    body = client.get("/api/shopping-list/export.csv").text
+    # The comma and the doubled quotes are quoted per RFC 4180...
+    assert '"Chili, ""hot"""' in body
+    # ...and it round-trips back to the original string through a CSV reader.
+    rows = {r[0]: r for r in csv.reader(io.StringIO(body.lstrip("﻿")))}
+    assert rows["Beans"][2] == 'Chili, "hot"'
+
+
+def test_csv_export_starts_with_bom_and_preserves_danish_characters(client) -> None:
+    _add(client, [{"name": "Rødløg", "quantity": "3", "source": None, "note": "øko hvis muligt"}])
+    resp = client.get("/api/shopping-list/export.csv")
+    body = resp.text
+    # A UTF-8 BOM so Excel reads æ/ø/å back correctly.
+    assert body.startswith("﻿")
+    assert "Rødløg" in body
+    assert "øko hvis muligt" in body
+    # Downloaded, not rendered inline.
+    assert "shopping-list.csv" in resp.headers.get("content-disposition", "")

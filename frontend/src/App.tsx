@@ -15,6 +15,7 @@ import {
 import { DishEditor } from "./DishEditor";
 import { PlanWeek } from "./PlanWeek";
 import { SettingsScreen } from "./SettingsScreen";
+import { ShoppingList } from "./ShoppingList";
 import "./app.css";
 
 // Issue #17 — Identify yourself and switch profiles.
@@ -271,7 +272,7 @@ function DishLibrary() {
   );
 }
 
-type Screen = "plan" | "library" | "settings";
+type Screen = "plan" | "library" | "shopping" | "settings";
 
 export function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -351,6 +352,13 @@ export function App() {
           Dish library
         </button>
         <button
+          onClick={() => setScreen("shopping")}
+          aria-current={screen === "shopping"}
+          style={{ fontWeight: screen === "shopping" ? 700 : 400 }}
+        >
+          Shopping list
+        </button>
+        <button
           onClick={() => setScreen("settings")}
           aria-current={screen === "settings"}
           style={{ fontWeight: screen === "settings" ? 700 : 400 }}
@@ -360,6 +368,7 @@ export function App() {
       </nav>
       {screen === "plan" && <PlanWeek key={profile.id} profile={profile} />}
       {screen === "library" && <DishLibrary />}
+      {screen === "shopping" && <ShoppingList />}
       {screen === "settings" && (
         <SettingsScreen
           key={profile.id}
