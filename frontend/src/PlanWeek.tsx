@@ -2,10 +2,13 @@ import { useEffect, useState } from "react";
 import { BiasSlider, Stepper } from "./SettingsScreen";
 import {
   addShoppingItems,
+  getPlanningRun,
   listDishes,
+  listPlanningRuns,
   planWeek,
   type Dish,
   type PlanningRun,
+  type PlanningRunSummary,
   type Profile,
   type SettingsOverride,
   type ShoppingItemInput,
@@ -402,6 +405,105 @@ function IngredientReview({
   );
 }
 
+// A run's status as a short word + tint, so failed and partial runs read as
+// themselves in the archive — the app never silently swallows a request.
+const STATUS_LABEL: Record<PlanningRunSummary["status"], string> = {
+  success: "✓ Complete",
+  partial: "⚠ Partial",
+  failed: "✕ Failed",
+};
+
+// A readable local timestamp; falls back to the raw ISO string if unparseable.
+function formatWhen(iso: string): string {
+  const d = new Date(iso);
+  return isNaN(d.getTime())
+    ? iso
+    : d.toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+}
+
+// Issue #26 — Past plans: every run the household has ever made stays
+// browsable forever, household-wide (not just this Profile's), newest first.
+// Each row carries enough — when, how many days, its status, and the fridge
+// notes it was planned against — to find the run you mean without opening each
+// one. Picking a row loads that run onto the board.
+function ArchiveModal({
+  onPick,
+  onClose,
+}: {
+  onPick: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [runs, setRuns] = useState<PlanningRunSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listPlanningRuns()
+      .then(setRuns)
+      .catch((e: unknown) => setError(String(e)));
+  }, []);
+
+  return (
+    <div
+      className="modal-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="modal wide">
+        <h2>🕘 Past plans</h2>
+        <p className="review-sub">
+          Every plan the household has made, newest first. Pick one to load it
+          onto the board.
+        </p>
+        {error && <p className="error">Could not load past plans: {error}</p>}
+        {runs && runs.length === 0 && (
+          <p className="muted">No plans yet — hit “⚡ Plan my week”.</p>
+        )}
+        {runs && runs.length > 0 && (
+          <div className="review-scroll">
+            <ul className="archive-list">
+              {runs.map((r) => (
+                <li key={r.id}>
+                  <button
+                    className="archive-row"
+                    onClick={() => onPick(r.id)}
+                  >
+                    <div className="archive-row-top">
+                      <span className="archive-when">
+                        {formatWhen(r.createdAt)}
+                      </span>
+                      <span className={`chip status-${r.status}`}>
+                        {STATUS_LABEL[r.status]}
+                      </span>
+                    </div>
+                    <div className="archive-row-meta muted">
+                      {r.profileName} · {r.dayCount}{" "}
+                      {r.dayCount === 1 ? "day" : "days"}
+                    </div>
+                    <div className="archive-fridge muted">
+                      {r.fridgeSnippet
+                        ? `🧊 ${r.fridgeSnippet}`
+                        : "🧊 No fridge notes"}
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <div className="modal-actions">
+          <button className="btn" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function PlanWeek({ profile }: { profile: Profile }) {
   const [dishes, setDishes] = useState<Dish[]>([]);
   const [run, setRun] = useState<PlanningRun | null>(null);
@@ -416,6 +518,8 @@ export function PlanWeek({ profile }: { profile: Profile }) {
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [reviewing, setReviewing] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // The Past-plans archive modal (issue #26).
+  const [browsing, setBrowsing] = useState(false);
 
   useEffect(() => {
     listDishes()
@@ -455,6 +559,20 @@ export function PlanWeek({ profile }: { profile: Profile }) {
       setError(String(e));
     } finally {
       setPlanning(false);
+    }
+  }
+
+  // Load an archived run onto the board. It replaces the current plan, so any
+  // selection (which pointed at the old board) is cleared, exactly as a fresh
+  // plan does.
+  async function loadRun(id: string) {
+    setError(null);
+    try {
+      setRun(await getPlanningRun(id));
+      setSelectedKeys(new Set());
+      setBrowsing(false);
+    } catch (e: unknown) {
+      setError(String(e));
     }
   }
 
@@ -512,7 +630,18 @@ export function PlanWeek({ profile }: { profile: Profile }) {
           ⚙ {settingsSummary(effective)}
           {override && <span className="chip-flag"> · this run</span>}
         </button>
+        <button
+          className="chip settings-chip"
+          title="Browse every plan the household has made"
+          onClick={() => setBrowsing(true)}
+        >
+          🕘 Past plans
+        </button>
       </div>
+
+      {browsing && (
+        <ArchiveModal onPick={loadRun} onClose={() => setBrowsing(false)} />
+      )}
 
       {editing && (
         <OverrideModal
