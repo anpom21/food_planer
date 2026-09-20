@@ -147,6 +147,10 @@ def merge_shopping_list(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 _TEXT_HEADER = "Shopping list — Food Planner"
 
+# A UTF-8 byte-order mark, written as an escape rather than an invisible glyph
+# in the source, so Excel opens the CSV as UTF-8 (æ/ø/å intact).
+_UTF8_BOM = "\ufeff"
+
 
 def _dish_sources(row: dict[str, Any]) -> list[dict[str, Any]]:
     """The row's dish-backed source entries; hand-added lines are excluded."""
@@ -203,4 +207,4 @@ def shopping_list_csv(rows: list[dict[str, Any]]) -> str:
         writer.writerow(
             [row["name"], (row.get("totalQuantity") or "").strip(), _notes_for(row)]
         )
-    return "﻿" + buffer.getvalue()
+    return _UTF8_BOM + buffer.getvalue()
