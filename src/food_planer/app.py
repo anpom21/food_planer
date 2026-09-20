@@ -484,7 +484,10 @@ def create_app(
     @api.get("/planning-runs", response_model=list[PlanningRunSummary])
     def list_planning_runs(store: Store = Depends(get_store)) -> list[dict]:
         # The household-wide archive as summaries — no suggestions shipped here.
-        return store["planning_runs"].read()
+        # Newest first (runs are stored in the order they were made) so the run
+        # someone just made, or a partner's recent plan, leads the list. Nothing
+        # is pruned: a household makes a handful of runs a week (issue #26).
+        return list(reversed(store["planning_runs"].read()))
 
     @api.get("/planning-runs/{run_id}", response_model=PlanningRun)
     def get_planning_run(

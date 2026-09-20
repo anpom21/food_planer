@@ -268,6 +268,63 @@ def test_structured_output_schema_is_strict_and_model_is_config(monkeypatch) -> 
     assert resolve_model()  # a non-empty default when unset
 
 
+# --- Past plans archive (issue #26) ---------------------------------------
+# Every run stays browsable forever, household-wide (not just one Profile),
+# newest first, as summaries — no suggestions shipped just to draw a list.
+
+
+def test_archive_is_household_wide_and_newest_first(client, fake_openai) -> None:
+    # Two different Profiles each make a run; the archive spans both, and the
+    # most recently made run is listed first.
+    fake_openai.canned = _canned_week()
+    ada = _make_profile(client, name="Ada")
+    bob = _make_profile(client, name="Bob")
+
+    first = client.post("/api/planning-runs", json={"profileId": ada}).json()
+    second = client.post("/api/planning-runs", json={"profileId": bob}).json()
+
+    archive = client.get("/api/planning-runs").json()
+    ids = [r["id"] for r in archive]
+    # Both Profiles' runs appear — a plan a partner made is reusable.
+    assert set(ids) == {first["id"], second["id"]}
+    # Newest first: Bob's later run leads the list.
+    assert ids[0] == second["id"]
+    assert ids[1] == first["id"]
+    # The row names the Profile whose run it was, so a partner's plan is found.
+    assert archive[0]["profileName"] == "Bob"
+    assert archive[1]["profileName"] == "Ada"
+
+
+def test_archive_rows_are_summaries_not_full_runs(client, fake_openai) -> None:
+    fake_openai.canned = _canned_week()
+    profile_id = _make_profile(client)
+    client.post("/api/planning-runs", json={"profileId": profile_id})
+
+    row = client.get("/api/planning-runs").json()[0]
+    # The list ships the summary fields the archive draws from…
+    for field in ("id", "createdAt", "profileName", "dayCount", "status"):
+        assert field in row
+    assert "fridgeSnippet" in row
+    # …but never the suggestion payload — that is the {id} read's job.
+    assert "days" not in row
+
+
+def test_archive_prunes_nothing(client, fake_openai) -> None:
+    # An old run is still listed after many later runs — nothing is pruned.
+    fake_openai.canned = _canned_week()
+    profile_id = _make_profile(client)
+    oldest = client.post(
+        "/api/planning-runs", json={"profileId": profile_id}
+    ).json()
+
+    for _ in range(12):
+        client.post("/api/planning-runs", json={"profileId": profile_id})
+
+    archive = client.get("/api/planning-runs").json()
+    assert len(archive) == 13
+    assert any(r["id"] == oldest["id"] for r in archive)
+
+
 def test_details_carry_full_description_and_ingredients(client, fake_openai) -> None:
     fake_openai.canned = _canned_week()
     profile_id = _make_profile(client)

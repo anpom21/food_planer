@@ -884,3 +884,64 @@ body {
   font-size: 14px;
   background: #fff;
 }
+
+/* Past-plans archive (issue #26) ----------------------------------------- */
+.archive-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.archive-row {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  transition: border-color 0.15s, background 0.15s;
+}
+.archive-row:hover {
+  border-color: var(--accent, #b8894a);
+  background: #fbf8f3;
+}
+.archive-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.archive-when {
+  font-weight: 600;
+}
+.archive-row-meta,
+.archive-fridge {
+  font-size: 12px;
+}
+.archive-fridge {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip.status-success {
+  background: #eef6f0;
+  color: #2f7a43;
+  border-color: #cfe3d8;
+}
+.chip.status-partial {
+  background: #fbf3e6;
+  color: #8a5a1f;
+  border-color: #f0e2cc;
+}
+.chip.status-failed {
+  background: #fbeae6;
+  color: #a3341f;
+  border-color: #f0d3cc;
+}

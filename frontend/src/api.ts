@@ -83,6 +83,19 @@ export type PlanningRun = {
   requestedSuggestionsPerDay: number | null;
 };
 
+// A row of the Past-plans archive (issue #26). The list endpoint ships these
+// summaries — never every suggestion of every week just to draw the list; the
+// full run (with days/suggestions) is fetched on demand by id.
+export type PlanningRunSummary = {
+  id: string;
+  createdAt: string;
+  profileId: string;
+  profileName: string;
+  dayCount: number;
+  status: "success" | "partial" | "failed";
+  fridgeSnippet: string;
+};
+
 export type SettingsOverride = {
   daysToPlan: number;
   suggestionsPerDay: number;
@@ -188,6 +201,22 @@ export function planWeek(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ profileId, settingsOverride }),
   }).then((r) => json<PlanningRun>(r));
+}
+
+// The Past-plans archive (issue #26): every run the household has ever made,
+// newest first and household-wide (not just the current Profile's), as
+// summaries. Picking one loads its full run via getPlanningRun.
+export function listPlanningRuns(): Promise<PlanningRunSummary[]> {
+  return fetch("/api/planning-runs").then((r) =>
+    json<PlanningRunSummary[]>(r),
+  );
+}
+
+// One full run by id — the days and suggestions the summary deliberately omits.
+export function getPlanningRun(id: string): Promise<PlanningRun> {
+  return fetch(`/api/planning-runs/${encodeURIComponent(id)}`).then((r) =>
+    json<PlanningRun>(r),
+  );
 }
 
 // One ingredient headed for the household ShoppingList (issue #29). `source`
