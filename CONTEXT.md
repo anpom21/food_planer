@@ -69,6 +69,16 @@ _Avoid_: Deal, discount, promotion, campaign
 The set of Offers gathered for a single PlanningRun, filtered down to food and ranked before it reaches the LLM. Describes one week's prices only — never accumulated into a library.
 _Avoid_: Discounts, offer list
 
+**Imported recipe**:
+A recipe scraped from a recipe website (valdemarsro.dk so far) into local JSON: title, link, thumbnail, ingredient lines, instructions, times, servings. Not part of the Household's Dish library. A PlanningRun only sees the dinner ones that use a fresh item or an Offer, ranked and capped; a Suggestion based on one links back to it (its `recipe`).
+_Avoid_: Dish (that's the Household's own library), Recipe on its own (ambiguous with a Dish's recipe text)
+
+**On hand**:
+An ingredient the Household already has — a fresh item (🥬) or a pantry staple (🫙). Marked on Suggestion and Imported recipe ingredients, and never matched to an Offer: there's nothing to buy.
+
+**Match review**:
+The model's check of an Offer tied to an ingredient by name when the match isn't 1:1 (a compound like "frilandsæg" for "æg", a multipack, a long heading). Exact matches are tied straight away; review matches only once the model confirms them (`matchedBy: "review"`). In the planning prompt, an Imported recipe's uncertain offers are marked "check offer" for the planner to judge.
+
 **ShoppingList**:
 One persistent, household-wide list of ingredients to buy. Accumulates items from any Profile's Suggestions over time (not scoped to a single PlanningRun or week) and is only cleared as items are ticked off / bought.
 _Avoid_: Ingredients list (both names were used loosely in early discussion; ShoppingList is the canonical term)

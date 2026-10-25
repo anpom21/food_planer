@@ -16,6 +16,7 @@ import { DishEditor } from "./DishEditor";
 import { Fridge } from "./Fridge";
 import { Offers } from "./Offers";
 import { PlanWeek } from "./PlanWeek";
+import { Recipes } from "./Recipes";
 import { SettingsScreen } from "./SettingsScreen";
 import { ShoppingList } from "./ShoppingList";
 import "./app.css";
@@ -274,7 +275,14 @@ function DishLibrary() {
   );
 }
 
-type Screen = "plan" | "fridge" | "library" | "shopping" | "offers" | "settings";
+type Screen =
+  | "plan"
+  | "fridge"
+  | "library"
+  | "recipes"
+  | "shopping"
+  | "offers"
+  | "settings";
 
 export function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -361,6 +369,13 @@ export function App() {
           Dish library
         </button>
         <button
+          onClick={() => setScreen("recipes")}
+          aria-current={screen === "recipes"}
+          style={{ fontWeight: screen === "recipes" ? 700 : 400 }}
+        >
+          Opskrifter
+        </button>
+        <button
           onClick={() => setScreen("shopping")}
           aria-current={screen === "shopping"}
           style={{ fontWeight: screen === "shopping" ? 700 : 400 }}
@@ -385,6 +400,7 @@ export function App() {
       {screen === "plan" && <PlanWeek key={profile.id} profile={profile} />}
       {screen === "fridge" && <Fridge />}
       {screen === "library" && <DishLibrary />}
+      {screen === "recipes" && <Recipes key={profile.id} profileId={profile.id} />}
       {screen === "shopping" && <ShoppingList />}
       {screen === "offers" && <Offers key={profile.id} profile={profile} />}
       {screen === "settings" && (

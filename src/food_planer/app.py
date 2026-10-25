@@ -46,14 +46,20 @@ from .discounts import (
     MAX_PROMPT_OFFERS,
     OFFER_LIMIT_CEILING,
     OfferCatalog,
+    REVIEW_SCHEMA,
+    approved_keys,
     attach_offers,
+    attach_reviewed,
+    bare_ref,
     is_food,
     offer_refs,
+    review_prompt,
     select_offers,
 )
 from .fridge import (
     SCAN_PROMPT,
     SCAN_SCHEMA,
+    OnHand,
     add_items,
     clean_name,
     fridge_body,
@@ -67,6 +73,16 @@ from .planning import (
     prompt_values,
     render_prompt_segments,
     unknown_variables,
+)
+from .recipes import load_all_recipes
+from .recipes.matching import (
+    MAX_PROMPT_RECIPES,
+    RecipeMatch,
+    ingredient_name,
+    match_dinner_recipes,
+    minutes,
+    recipe_link,
+    recipe_refs,
 )
 from .shopping_list import (
     merge_shopping_list,
@@ -213,6 +229,20 @@ class PlanningRunIn(BaseModel):
 class SuggestionIngredient(BaseModel):
     name: str
     quantity: str  # free text: "200 g", "1 pinch"
+    # "fresh" (in the fridge) or "staple" (in the pantry) when we have it.
+    have: str | None = None
+
+
+class SuggestionRecipe(BaseModel):
+    """The imported recipe a Suggestion is based on (see recipes.matching.recipe_link)."""
+
+    title: str
+    url: str
+    source: str | None = None
+    thumbnail: str | None = None
+    totalTime: str | None = None
+    workTime: str | None = None
+    servings: str | None = None
 
 
 class Suggestion(BaseModel):
@@ -225,6 +255,7 @@ class Suggestion(BaseModel):
     # The full offers this dish draws on, denormalized so an archived run
     # still shows them after they expire.
     discounts: list[dict] = Field(default_factory=list)
+    recipe: SuggestionRecipe | None = None
 
 
 class DayPlan(BaseModel):
@@ -314,6 +345,52 @@ def _write_trace(store: Store, run_id: str, trace: dict) -> Path | None:
     except OSError:
         log.exception("run %s: could not write the trace file %s", run_id, path)
         return None
+
+
+class RecipeIngredient(BaseModel):
+    text: str
+    group: str | None = None
+    have: str | None = None  # "fresh" | "staple" when it's in the house
+
+
+class RecipeSummary(BaseModel):
+    """One imported recipe as the Recipes screen shows it.
+
+    The stored record (``data/recipes/<site>.json``) also carries the blog
+    intro and the instructions; those stay on disk, since the screen links out
+    to the source page for the full recipe.
+    """
+
+    source: str
+    url: str
+    title: str
+    thumbnail: str | None = None
+    ingredients: list[RecipeIngredient]
+    servings: str | None = None
+    total_time: str | None = None
+    categories: list[str] = Field(default_factory=list)
+
+
+class RecipeFreshUse(BaseModel):
+    item: str  # the Fridge item, as stored
+    ingredient: str  # the recipe ingredient that uses it
+
+
+class RecipeOfferUse(BaseModel):
+    ingredient: str
+    shop: str
+    productName: str
+    price: float | None = None
+    review: bool = False  # not a 1:1 match; the planner is asked to check it
+
+
+class RecipeMatchOut(RecipeSummary):
+    """A recipe the planner would consider this week, and why."""
+
+    score: float
+    inPrompt: bool
+    fresh: list[RecipeFreshUse]
+    offers: list[RecipeOfferUse]
 
 
 def _normalize_email(email: str) -> str:
@@ -627,6 +704,84 @@ def create_app(
         food = [o for o in offers if is_food(o)]
         return offer_refs(select_offers(food, dishes, cap=limit)), food, failed
 
+    def _mark_on_hand(recipe: dict, on_hand: OnHand) -> dict:
+        """The recipe with each ingredient line marked fresh/staple if we have it."""
+        return {
+            **recipe,
+            "ingredients": [
+                {**i, "have": on_hand.kind(ingredient_name(i["text"]))}
+                for i in recipe.get("ingredients", [])
+            ],
+        }
+
+    async def _review_offer_matches(
+        openai: OpenAIClient, pending: list[dict], run_id: str, trace: dict
+    ) -> int:
+        """Ask the model about the name matches that weren't 1:1 and attach the
+        ones it confirms. A failed call attaches none: a missing offer tag is
+        better than a wrong one."""
+        if not pending:
+            return 0
+        prompt, refs = review_prompt(pending)
+        try:
+            result = await openai.review_matches(prompt=prompt, schema=REVIEW_SCHEMA)
+        except Exception as exc:
+            log.exception("run %s: match review failed", run_id)
+            result = LLMResult(status="error", error=f"{type(exc).__name__}: {exc}")
+        approved = approved_keys(result.output, refs) if result.status == "completed" else set()
+        attached = attach_reviewed(pending, approved)
+        trace["matchReview"] = {
+            "prompt": prompt,
+            "status": result.status,
+            "error": result.error,
+            "verdicts": copy.deepcopy(result.output),
+            "attached": attached,
+        }
+        log.info(
+            "run %s: match review of %d pair(s): %d confirmed (%s)",
+            run_id, len(refs), len(approved), result.status,
+        )
+        return attached
+
+    def _mark_suggestions(days: list, fridge: dict) -> None:
+        """Mark each Suggestion ingredient we already have: fresh or staple."""
+        on_hand = OnHand.from_fridge(fridge)
+        for day in days:
+            for suggestion in day.get("suggestions", []):
+                for ingredient in suggestion.get("ingredients", []):
+                    ingredient["have"] = on_hand.kind(ingredient.get("name", ""))
+
+    def _link_recipes(days: list, recipes: list[RecipeMatch]) -> int:
+        """Swap each Suggestion's sourceRecipe ref for the recipe itself (link,
+        thumbnail, real times). A made-up ref is dropped; a suggestion titled
+        exactly like a listed recipe is linked even without the ref. Returns
+        how many were linked."""
+        refs = recipe_refs(recipes)
+        by_title = {m.recipe["title"].casefold(): m for m in recipes}
+        linked = 0
+        for day in days:
+            for suggestion in day.get("suggestions", []):
+                ref = bare_ref(suggestion.pop("sourceRecipe", None))
+                match = refs.get(ref) or by_title.get(suggestion.get("title", "").casefold())
+                suggestion["recipe"] = recipe_link(match.recipe) if match else None
+                if match:
+                    linked += 1
+                    # The recipe's own time beats the model's estimate.
+                    real = minutes(match.recipe.get("total_time"))
+                    if real:
+                        suggestion["prepTimeMinutes"] = real
+        return linked
+
+    def _run_recipes(
+        store: Store, fridge: dict, food_offers: list[dict], limit: int | None
+    ) -> list[RecipeMatch]:
+        """The imported dinner recipes that use a fresh item or one of the
+        week's food offers, best first. Matched against every food offer at
+        the preferred shops, not just the capped list the model sees."""
+        return match_dinner_recipes(
+            load_all_recipes(store.data_dir), fridge, food_offers, limit=limit
+        )
+
     # --- The planning prompt: one household-wide, editable template ---------
     # Values derived from the library and a Profile's settings are injected
     # wherever a {{variable}} appears. A template naming a variable the planner
@@ -704,12 +859,12 @@ def create_app(
         _check_template(template)
         dishes = store["dishes"].read()
         limit = body.offerLimit if body.offerLimit is not None else _offer_limit(store)
-        offers, _, _ = await _run_offers(
+        offers, food_offers, _ = await _run_offers(
             profile["settings"], dishes, tjek, catalog, limit
         )
-        values = prompt_values(
-            dishes, profile["settings"], offers, store["fridge"].read()
-        )
+        fridge = store["fridge"].read()
+        recipes = _run_recipes(store, fridge, food_offers, MAX_PROMPT_RECIPES)
+        values = prompt_values(dishes, profile["settings"], offers, fridge, recipes)
         return {"segments": render_prompt_segments(template, values)}
 
     # --- PlanningRuns: one button, one pass, a whole week (issue #23) -------
@@ -826,7 +981,17 @@ def create_app(
         template = store["prompt"].read()["template"]
         trace["customTemplate"] = template is not None
         fridge = store["fridge"].read()
-        prompt = compose_planning_prompt(dishes, settings, template, offers, fridge)
+        recipes = _run_recipes(store, fridge, food_offers, MAX_PROMPT_RECIPES)
+        trace["recipes"] = {
+            "shownToModel": [
+                {"title": m.recipe["title"], "url": m.recipe["url"], "score": round(m.score, 2)}
+                for m in recipes
+            ],
+        }
+        log.info("run %s: %d matched recipes shown to the model", run_id, len(recipes))
+        prompt = compose_planning_prompt(
+            dishes, settings, template, offers, fridge, recipes
+        )
         result = await call(prompt, requested_days, requested_per_day, "first")
 
         status = "success"
@@ -859,7 +1024,7 @@ def create_app(
             )
             retry = await call(
                 compose_planning_prompt(
-                    dishes, retry_settings, template, offers, fridge
+                    dishes, retry_settings, template, offers, fridge, recipes
                 ),
                 retry_settings["daysToPlan"],
                 retry_settings["suggestionsPerDay"],
@@ -872,7 +1037,10 @@ def create_app(
                 status = "failed"
 
         days = (output or {}).get("days", [])
+        _mark_suggestions(days, fridge)  # before offers: what we have needs no offer
         matched = attach_offers(days, offers, food_offers)
+        reviewed = await _review_offer_matches(openai, matched.pop("review"), run_id, trace)
+        linked = _link_recipes(days, recipes)
         if matched["dropped"]:
             log.warning(
                 "run %s: dropped offer ids the model made up: %s",
@@ -910,6 +1078,8 @@ def create_app(
             "suggestionCount": suggestion_count,
             "offersCitedByModel": matched["model"],
             "offersMatchedByName": matched["name"],
+            "offersConfirmedByReview": reviewed,
+            "recipesLinked": linked,
             "droppedOfferIds": matched["dropped"],
             "days": days,
         }
@@ -943,6 +1113,55 @@ def create_app(
             if run["id"] == run_id:
                 return run
         raise HTTPException(status_code=404, detail="Planning run not found")
+
+    # --- Recipes: imported from recipe websites by `food-planer-recipes` ----
+    # Read-only here; the scraper owns data/recipes/<site>.json.
+
+    @api.get("/recipes", response_model=list[RecipeSummary])
+    def list_recipes(store: Store = Depends(get_store)) -> list[dict]:
+        on_hand = OnHand.from_fridge(store["fridge"].read())
+        return [_mark_on_hand(r, on_hand) for r in load_all_recipes(store.data_dir)]
+
+    @api.get("/recipes/matches", response_model=list[RecipeMatchOut])
+    async def list_recipe_matches(
+        profileId: str,
+        store: Store = Depends(get_store),
+        tjek: TjekClient = Depends(get_tjek_client),
+        catalog: OfferCatalog = Depends(get_offer_catalog),
+    ) -> list[dict]:
+        """Every dinner recipe that uses a fresh item or one of this week's
+        offers at the Profile's shops, best first — the same ranking the
+        planner uses, with ``inPrompt`` marking the ones it actually sees."""
+        profile = next(
+            (p for p in store["profiles"].read() if p["id"] == profileId), None
+        )
+        if profile is None:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        _, food_offers, _ = await _run_offers(
+            profile["settings"], store["dishes"].read(), tjek, catalog, _offer_limit(store)
+        )
+        fridge = store["fridge"].read()
+        on_hand = OnHand.from_fridge(fridge)
+        matches = _run_recipes(store, fridge, food_offers, None)
+        return [
+            {
+                **_mark_on_hand(m.recipe, on_hand),
+                "score": round(m.score, 2),
+                "inPrompt": rank < MAX_PROMPT_RECIPES,
+                "fresh": [{"item": item, "ingredient": ing} for item, ing in m.fresh.items()],
+                "offers": [
+                    {
+                        "ingredient": o["ingredient"],
+                        "shop": o["offer"]["shop"],
+                        "productName": o["offer"]["item_name"],
+                        "price": o["offer"].get("price"),
+                        "review": o["review"],
+                    }
+                    for o in m.offers
+                ],
+            }
+            for rank, m in enumerate(matches)
+        ]
 
     # --- Shops: the fixed Danish-chain catalog and its logos (issue #20) -----
     # Backend-owned so the discount fetcher and the pill picker share one

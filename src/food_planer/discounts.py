@@ -253,7 +253,8 @@ NON_FOOD_WORDS: tuple[str, ...] = (
     "skyllemiddel", "rengøringsmiddel", "toiletpapir", "køkkenrulle", "bleer",
     "vådservietter", "servietter",
     # pets & tobacco
-    "foder", "kattegrus", "hundesnack", "cigaretter", "tobak", "snus",
+    "foder", "kattegrus", "hundesnack", "vildtfugleblanding", "fuglenødder",
+    "fuglefrø", "cigaretter", "tobak", "snus",
 )
 
 # Too short to match as a compound's tail without false hits ("Frisko" ice
@@ -392,6 +393,12 @@ def offer_refs(offers: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {f"o{i}": offer for i, offer in enumerate(offers, start=1)}
 
 
+def bare_ref(ref: str | None) -> str:
+    """A short ref as the model may write it, without brackets: "[o1]" → "o1".
+    The prompt shows refs in brackets, and models sometimes copy them."""
+    return (ref or "").strip().strip("[]").strip()
+
+
 def denormalize_discount(
     offer: dict[str, Any], matched_ingredient: str | None, matched_by: str
 ) -> dict[str, Any]:
@@ -476,6 +483,53 @@ def offer_for_ingredient(
     return best_offer
 
 
+# Words that qualify a product without changing what it is, so they don't
+# count against a match being 1:1 ("Økologisk dansk agurk" is a cucumber).
+_QUALIFIERS = frozenset(
+    "økologisk økologiske øko dansk danske frilands friland spisemodne "
+    "laktosefri hel hele små store mini klassisk original".split()
+)
+# A heading may carry this many other words (a brand, a variety) and still be
+# a 1:1 match: "Lurpak smør", "Dairy Goood hytteost".
+MAX_EXTRA_WORDS = 2
+
+
+def match_grade(name: str, offer: dict[str, Any]) -> str:
+    """How close a name match is: ``"exact"`` or ``"review"``.
+
+    Exact means some product in the heading *is* the ingredient: every word
+    of the name is a whole word there (plural and definite endings allowed)
+    with at most :data:`MAX_EXTRA_WORDS` other words beside it. Everything
+    :func:`offer_for_ingredient` lets through beyond that is a guess for the
+    model to review: a compound ("K-Salat bearnaisesauce" for "salat",
+    "Briocheburgerboller" for "burgerboller"), a word only after "med"/"af"
+    ("Roastbeef af okseinderlår"), a long heading, or a multipack listing
+    three or more products ("XXL kyllinge-sandwichskiver, hamburgerryg,
+    kyllingebryst eller rullepølse" is cold cuts, not raw chicken breast).
+    """
+    words = _name_words(name)
+    heading = (offer.get("item_name") or "").lower()
+    product = re.split(r"\b(?:med|af)\b", heading, maxsplit=1)[0]
+    stems = [re.compile(re.escape(w) + r"(?:e|r|n|en|er|ne|erne|ene)?") for w in words]
+    # A heading may list several products: "Lurpak smør eller smørbar". Two
+    # are a variant pair; more is a mixed promotion worth a second look.
+    segments = re.split(r",|/|&|\beller\b|\bog\b", product)
+    if len([seg for seg in segments if seg.strip()]) > 2:
+        return "review"
+    for segment in segments:
+        tokens = [
+            t
+            for t in re.findall(r"[a-zæøå][a-zæøå-]*", segment)
+            if len(t) >= 2 and t not in _FILLER_WORDS
+        ]
+        hits = {t for t in tokens for stem in stems if stem.fullmatch(t)}
+        if words and all(any(stem.fullmatch(t) for t in tokens) for stem in stems):
+            extra = [t for t in tokens if t not in hits and t not in _QUALIFIERS]
+            if len(extra) <= MAX_EXTRA_WORDS:
+                return "exact"
+    return "review"
+
+
 def attach_offers(
     days: list[dict[str, Any]],
     cited: dict[str, dict[str, Any]],
@@ -487,16 +541,21 @@ def attach_offers(
     ``cited`` is the run's short ref → offer table the model cited from; a ref
     that isn't in it is dropped rather than trusted, and an offer is kept once
     per Suggestion. ``food_offers`` is every food offer at the preferred shops
-    — the name matching looks wider than the capped list the model saw.
-    Returns counts (and the dropped refs) for the run's log.
+    — the name matching looks wider than the capped list the model saw. An
+    ingredient marked ``have`` (in the fridge or pantry) is never matched by
+    name: there's nothing to buy.
+    A name match that isn't 1:1 (see :func:`match_grade`) is not attached
+    but queued in ``stats["review"]`` for the model to confirm; attach the
+    confirmed ones with :func:`attach_reviewed`. Returns counts (and the
+    dropped refs) for the run's log.
     """
-    stats: dict[str, Any] = {"model": 0, "name": 0, "dropped": []}
+    stats: dict[str, Any] = {"model": 0, "name": 0, "dropped": [], "review": []}
     for day in days:
         for suggestion in day.get("suggestions", []):
             attached: dict[str, dict[str, Any]] = {}
             covered: set[str] = set()
             for ref in suggestion.get("discounts") or []:
-                offer = cited.get(ref.get("offerId", ""))
+                offer = cited.get(bare_ref(ref.get("offerId")))
                 if offer is None:
                     stats["dropped"].append(ref.get("offerId"))
                     continue
@@ -509,11 +568,105 @@ def attach_offers(
                     stats["model"] += 1
             for ingredient in suggestion.get("ingredients", []):
                 name = ingredient.get("name", "")
-                if name.lower().strip() in covered:
+                # Covered by a citation, or already in the house: nothing to buy.
+                if name.lower().strip() in covered or ingredient.get("have"):
                     continue
                 offer = offer_for_ingredient(name, food_offers)
-                if offer is not None and offer["id"] not in attached:
+                if offer is None or offer["id"] in attached:
+                    continue
+                if match_grade(name, offer) == "exact":
                     attached[offer["id"]] = denormalize_discount(offer, name, "name")
                     stats["name"] += 1
+                else:
+                    stats["review"].append(
+                        {"suggestion": suggestion, "ingredient": name, "offer": offer}
+                    )
             suggestion["discounts"] = list(attached.values())
     return stats
+
+
+# --- The match review --------------------------------------------------------
+# Name matches that aren't 1:1 go to the model in one small structured call:
+# it sees each ingredient beside the offer's heading and says whether buying
+# the offer gets you the ingredient. Only a yes is attached.
+
+REVIEW_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "verdicts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"id": {"type": "string"}, "match": {"type": "boolean"}},
+                "required": ["id", "match"],
+            },
+        }
+    },
+    "required": ["verdicts"],
+}
+
+
+def review_key(ingredient: str, offer: dict[str, Any]) -> tuple[str, str]:
+    return (ingredient.lower().strip(), offer["id"])
+
+
+def review_prompt(pending: list[dict[str, Any]]) -> tuple[str, dict[str, tuple[str, str]]]:
+    """The review call's prompt, and its short ref (``m1``…) → review key.
+
+    The same ingredient/offer pair queued by two Suggestions is asked once.
+    """
+    refs: dict[str, tuple[str, str]] = {}
+    lines: list[str] = []
+    for item in pending:
+        key = review_key(item["ingredient"], item["offer"])
+        if key in refs.values():
+            continue
+        ref = f"m{len(refs) + 1}"
+        refs[ref] = key
+        offer = item["offer"]
+        description = " ".join((offer.get("description") or "").split())
+        detail = f" ({description})" if description else ""
+        lines.append(
+            f"[{ref}] ingredient: {item['ingredient']} — offer: "
+            f"{offer['item_name']}{detail} at {offer['shop']}"
+        )
+    prompt = (
+        "You check a meal planner's guesses that a grocery offer covers a "
+        "recipe ingredient. For each pair, answer match=true only if buying "
+        "the offered product gives you that ingredient — the same kind of "
+        "food; brand, size, organic or lactose-free don't matter. Answer "
+        "false when it is a different product that merely shares a word "
+        "(\"K-Salat bearnaisesauce\" is not lettuce, \"Roastbeef\" is not a raw "
+        "joint), a ready meal containing it, or not food. Answer every [id].\n\n"
+        + "\n".join(lines)
+    )
+    return prompt, refs
+
+
+def approved_keys(
+    output: dict[str, Any] | None, refs: dict[str, tuple[str, str]]
+) -> set[tuple[str, str]]:
+    """The review keys the model said yes to. A ref it made up is ignored."""
+    verdicts = (output or {}).get("verdicts") or []
+    return {refs[v["id"]] for v in verdicts if v.get("match") and v.get("id") in refs}
+
+
+def attach_reviewed(
+    pending: list[dict[str, Any]], approved: set[tuple[str, str]]
+) -> int:
+    """Attach the confirmed name matches to their Suggestions (``matchedBy:
+    "review"``), once per Suggestion per offer. Returns how many."""
+    count = 0
+    for item in pending:
+        if review_key(item["ingredient"], item["offer"]) not in approved:
+            continue
+        suggestion = item["suggestion"]
+        if any(d["offerId"] == item["offer"]["id"] for d in suggestion["discounts"]):
+            continue
+        suggestion["discounts"].append(
+            denormalize_discount(item["offer"], item["ingredient"], "review")
+        )
+        count += 1
+    return count

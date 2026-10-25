@@ -14,10 +14,12 @@ dependencies = [
     "openai>=3.16.2",
     "python-dotenv>=1.2.3",
     "httpx>=0.28",
+    "beautifulsoup4>=4.15.0",
 ]
 
 [project.scripts]
 food-planer = "food_planer:main"
+food-planer-recipes = "food_planer.recipes:main"
 
 [dependency-groups]
 dev = [

@@ -269,9 +269,10 @@ def test_uncited_ingredients_are_matched_to_offers_by_name(
     assert by_ingredient == {
         "hakket oksekød": "Netto hakket oksekød 8-12%",
         "ris": "Jasmin ris",  # a whole word beats the tail of "Kapris"
-        "æg": "Dava danske frilandsæg",  # a compound's tail still counts
+        "æg": "Dava danske frilandsæg",  # a compound's tail, confirmed by review
     }
-    assert {d["matchedBy"] for d in discounts} == {"name"}
+    by = {d["matchedIngredient"]: d["matchedBy"] for d in discounts}
+    assert by == {"hakket oksekød": "name", "ris": "name", "æg": "review"}
 
 
 def test_shops_take_turns_in_the_capped_list(client, fake_openai, fake_tjek) -> None:

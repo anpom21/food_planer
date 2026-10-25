@@ -39,9 +39,26 @@ export type DishInput = Omit<Dish, "id">;
 // Planning a week (issue #23): one press → one structured LLM call → a whole
 // week, returned synchronously and persisted server-side.
 
+// What we already have of an ingredient: a fresh item in the fridge or a
+// pantry staple. Absent/null means it needs buying.
+export type OnHand = "fresh" | "staple" | null;
+
 export type SuggestionIngredient = {
   name: string;
   quantity: string; // free text: "200 g", "1 pinch"
+  have?: OnHand;
+};
+
+// The imported recipe a Suggestion is based on: its link, thumbnail and the
+// recipe's own times and servings (prepTimeMinutes is set from totalTime).
+export type SuggestionRecipe = {
+  title: string;
+  url: string;
+  source: string | null;
+  thumbnail: string | null;
+  totalTime: string | null;
+  workTime: string | null;
+  servings: string | null;
 };
 
 // One offer a Suggestion draws on, denormalized in full when the run was made
@@ -60,6 +77,9 @@ export type Discount = {
   validUntil: string | null;
   imageUrl: string | null;
   matchedIngredient: string | null;
+  // Who tied it to the dish: cited by the model, an exact name match, or an
+  // uncertain name match the model confirmed in review.
+  matchedBy?: "model" | "name" | "review";
 };
 
 export type Suggestion = {
@@ -70,6 +90,7 @@ export type Suggestion = {
   prepTimeMinutes: number;
   sourceDish: string | null; // a Dish id; null means an invented dish
   discounts: Discount[];
+  recipe?: SuggestionRecipe | null;
 };
 
 export type DayPlan = {
@@ -184,6 +205,51 @@ export function shopIconUrl(slug: string): string {
 
 export function listDishes(): Promise<Dish[]> {
   return fetch("/api/dishes").then((r) => json<Dish[]>(r));
+}
+
+// Recipes imported from recipe websites by `food-planer-recipes <site>`.
+// Read-only; each one links out to its source page for the full method.
+export type RecipeIngredient = {
+  text: string;
+  group: string | null; // the sub-heading it sits under, e.g. "Til servering"
+  have?: OnHand;
+};
+
+export type Recipe = {
+  source: string;
+  url: string;
+  title: string;
+  thumbnail: string | null;
+  ingredients: RecipeIngredient[];
+  servings: string | null;
+  total_time: string | null;
+  categories: string[];
+};
+
+export function listRecipes(): Promise<Recipe[]> {
+  return fetch("/api/recipes").then((r) => json<Recipe[]>(r));
+}
+
+// A dinner recipe the planner would consider this week, and why: the fresh
+// items it uses up and the offers it uses, ranked the way the planner ranks
+// them. `inPrompt` marks the ones the planner actually sees.
+export type RecipeMatch = Recipe & {
+  score: number;
+  inPrompt: boolean;
+  fresh: { item: string; ingredient: string }[];
+  offers: {
+    ingredient: string;
+    shop: string;
+    productName: string;
+    price: number | null;
+    review: boolean; // not a 1:1 match: the planner is asked to check it
+  }[];
+};
+
+export function listRecipeMatches(profileId: string): Promise<RecipeMatch[]> {
+  return fetch(`/api/recipes/matches?profileId=${encodeURIComponent(profileId)}`).then(
+    (r) => json<RecipeMatch[]>(r),
+  );
 }
 
 export function createDish(input: DishInput): Promise<Dish> {
