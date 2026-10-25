@@ -247,6 +247,36 @@ def _offers_block(offers: dict[str, dict[str, Any]]) -> str:
     return "\n".join(offer_line(ref, offer) for ref, offer in offers.items())
 
 
+# How the planner uses the imported recipes, per the Profile's recipeMode:
+# "only" every dish is one, "mix" about half, "none" never (no list at all).
+_RECIPE_SHARE = {
+    "only": (
+        "Every suggestion must be one of these recipes: set each suggestion's "
+        "sourceRecipe to the recipe's [id]. Don't invent dishes or take them "
+        "from the library."
+    ),
+    "mix": (
+        "Base about half of the suggestions on these recipes (setting "
+        "sourceRecipe to the recipe's [id]) and the rest on the library or new "
+        "dishes, as the other instructions say."
+    ),
+}
+
+
+def _recipes_instruction(mode: str) -> str:
+    return (
+        "These recipes from our recipe collection use fresh items we have at "
+        "home or products on offer this week. "
+        + _RECIPE_SHARE.get(mode, _RECIPE_SHARE["mix"])
+        + " A dish based on a recipe is that recipe exactly — its title, "
+        "ingredients and method are taken from it, so pick recipes whose "
+        "ingredients suit the week as they are. \"check offer\" marks a "
+        "product that may not be the ingredient it was matched to: judge from "
+        "the product name, and only count it as on offer when it really is "
+        "that ingredient."
+    )
+
+
 def prompt_values(
     dishes: list[dict[str, Any]],
     settings: dict[str, Any],
@@ -268,6 +298,7 @@ def prompt_values(
     :mod:`food_planer.recipes.matching`).
     """
     offers = offers or {}
+    recipe_mode = settings.get("recipeMode") or "mix"
     offer_ids = {offer["id"]: ref for ref, offer in offers.items()}
     recipe_list = "\n".join(
         recipe_prompt_line(ref, match, offer_ids)
@@ -279,7 +310,12 @@ def prompt_values(
     return {
         "days": str(settings["daysToPlan"]),
         "suggestions_per_day": str(settings["suggestionsPerDay"]),
-        "bias_instruction": _bias_sentence(settings.get("knownVsUnknownBias", 0.5)),
+        # With only online recipes the library lean doesn't apply.
+        "bias_instruction": (
+            ""
+            if recipe_mode == "only" and recipe_list
+            else _bias_sentence(settings.get("knownVsUnknownBias", 0.5))
+        ),
         "priority_order": ", ".join(priority),
         "priority_instruction": (
             "When choosing dishes, prioritise them in this order: "
@@ -307,13 +343,7 @@ def prompt_values(
         **fridge_prompt_values(fridge or {"items": []}),
         "recipes": recipe_list,
         "recipes_instruction": (
-            "These recipes from our recipe collection use fresh items we have "
-            "at home or products on offer this week. Base dishes on them where "
-            "they fit; when you do, set the suggestion's sourceRecipe to the "
-            "recipe's [id] and use the recipe's title. \"check offer\" marks a "
-            "product that may not be the ingredient it was matched to: judge "
-            "from the product name, and only count it as on offer (or cite "
-            "it) when it really is that ingredient.\n\n" + recipe_list
+            _recipes_instruction(recipe_mode) + "\n\n" + recipe_list
             if recipe_list
             else ""
         ),

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   addFridgeItems,
   getFridge,
+  clearFridge,
   removeFridgeItem,
   scanFridge,
   type Fridge as FridgeData,
@@ -140,6 +141,7 @@ function Section({
   common,
   onAdd,
   onRemove,
+  onClear,
 }: {
   kind: FridgeKind;
   title: string;
@@ -148,6 +150,7 @@ function Section({
   common: string[];
   onAdd: (name: string, kind: FridgeKind) => void;
   onRemove: (item: FridgeItem) => void;
+  onClear: (kind: FridgeKind) => void;
 }) {
   const [typed, setTyped] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -155,9 +158,22 @@ function Section({
 
   return (
     <section className="fridge-section">
-      <h2>
-        {KIND_EMOJI[kind]} {title}
-      </h2>
+      <div className="fridge-section-head">
+        <h2>
+          {KIND_EMOJI[kind]} {title}
+        </h2>
+        {/* Confirmed, since it empties the whole list in one tap. The names
+            stay in the common items, so refilling is quick. */}
+        <button
+          className="btn ghost fridge-clear"
+          disabled={items.length === 0}
+          onClick={() => {
+            if (window.confirm(`Remove all ${items.length} ${title.toLowerCase()}?`)) onClear(kind);
+          }}
+        >
+          Clear
+        </button>
+      </div>
       <p className="muted">{blurb}</p>
 
       {items.length === 0 ? (
@@ -425,6 +441,7 @@ export function Fridge() {
 
   const add = (name: string, kind: FridgeKind) => act(() => addFridgeItems([{ name, kind }]));
   const remove = (item: FridgeItem) => act(() => removeFridgeItem(item.id));
+  const clear = (kind: FridgeKind) => act(() => clearFridge(kind));
 
   return (
     <section className="library fridge">
@@ -477,6 +494,7 @@ export function Fridge() {
           common={fridge.common.fresh}
           onAdd={add}
           onRemove={remove}
+          onClear={clear}
         />
         <Section
           kind="staple"
@@ -486,6 +504,7 @@ export function Fridge() {
           common={fridge.common.staple}
           onAdd={add}
           onRemove={remove}
+          onClear={clear}
         />
       </div>
 

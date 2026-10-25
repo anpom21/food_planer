@@ -59,36 +59,10 @@
   padding: 14px 16px 16px;
 }
 
-.recipe-meta {
-  margin: -4px 0 10px;
-  font-size: 12.5px;
-}
-
-.recipe-ingredients {
-  font-size: 13px;
-  margin-bottom: 14px;
-}
-
-.recipe-ingredients summary {
-  cursor: pointer;
-  color: var(--ink-soft);
-}
-
-.recipe-ingredients h3 {
-  margin: 10px 0 2px;
-  font-size: 12.5px;
-}
-
-.recipe-ingredients ul {
-  margin: 6px 0 0;
-  padding-left: 18px;
-  line-height: 1.5;
-}
-
 .recipe-link {
   margin-top: auto;
-  align-self: flex-start;
   text-decoration: none;
+  text-align: center;
 }
 
 .recipe-more {
@@ -140,46 +114,23 @@
   color: #fff;
 }
 
-.recipe-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: 0 0 10px;
+.recipe-card .sugg-chips {
+  margin-bottom: 12px;
 }
 
-.recipe-chips .chip {
-  font-size: 11.5px;
-  line-height: 1.4;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  white-space: nowrap;
+.recipe-card .sugg-actions {
+  margin-bottom: 8px;
 }
 
-.recipe-chips .chip.prompt {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  font-weight: 600;
-}
 
-.recipe-chips .chip.fresh {
+.chip.have-fresh {
   background: #eef6ea;
   border-color: #cfe3c4;
   color: #2f5a1f;
 }
 
-.recipe-chips .chip.offer {
-  background: #fdf1e3;
-  border-color: #f0d6b4;
-  color: #7a4710;
-}
-
-.recipe-chips .chip.offer.review {
-  background: transparent;
-  border-style: dashed;
-}
-
-.recipe-ingredients li .onhand {
-  margin-left: 4px;
+.chip.have-staple {
+  background: #eef1f5;
+  border-color: #d5dce6;
+  color: #46566b;
 }

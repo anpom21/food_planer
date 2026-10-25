@@ -1499,3 +1499,97 @@ body {
   margin-right: auto;
   font-size: 13px;
 }
+
+/* Destructive actions: outlined red, filled on hover. */
+.btn.danger {
+  color: #a83232;
+  border-color: #e8c4c4;
+}
+.btn.danger:hover {
+  background: #fbeaea;
+  border-color: #d9a3a3;
+}
+
+/* Shopping list: select rows to clear, or clear the lot. */
+.shopping-actions {
+  display: flex;
+  gap: 8px;
+  margin: -8px 0 14px;
+}
+.shopping-actions .btn.danger {
+  margin-left: auto;
+}
+.shopping-row input[type="checkbox"] {
+  margin: 0 2px 0 0;
+}
+.shopping-row.picked {
+  border-color: var(--accent);
+  background: #fdf5f0;
+}
+
+/* Fridge: the section title with its Clear button. */
+.fridge-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fridge-clear {
+  padding: 4px 10px;
+  font-size: 12.5px;
+}
+
+/* Plan tab: the Profile's planning settings, folded under the plan bar. */
+.plan-settings {
+  margin: 12px 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.plan-settings > summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 14px;
+}
+.plan-settings[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+.plan-settings > .settings {
+  padding: 4px 14px 14px;
+  max-width: none;
+}
+
+/* Online-recipes mode: three pills, one on. */
+.mode-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mode-pill {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.mode-pill span {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.mode-pill.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(193, 89, 43, 0.18);
+}
+
+.chip.recipe {
+  background: #f3eefa;
+  color: #5b3f8a;
+  border-color: #e0d6f0;
+}

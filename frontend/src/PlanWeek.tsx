@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BiasSlider, Stepper } from "./SettingsScreen";
+import { BiasSlider, PlanningSettingsForm, Stepper } from "./SettingsScreen";
 import { OfferCard, OfferTag, offerFor } from "./OfferTag";
 import { OnHandBadge } from "./OnHand";
 import { RecipeButton, RecipeFacts, RecipeThumb } from "./RecipeLink";
@@ -171,7 +171,9 @@ function SuggestionCard({
       <h3 className="sugg-title">{suggestion.title}</h3>
       <p className="sugg-desc">{suggestion.description}</p>
       <div className="sugg-chips">
-        {suggestion.sourceDish ? (
+        {suggestion.recipe ? (
+          <span className="chip recipe">📖 {suggestion.recipe.source ?? "Recipe"}</span>
+        ) : suggestion.sourceDish ? (
           <span className="chip known">
             ⭐ {known ? known.title : "Known dish"}
           </span>
@@ -216,7 +218,7 @@ function SuggestionCard({
 
 // Details opens the full suggestion — the description in full and the ingredient
 // list that the card deliberately withholds.
-function DetailsModal({
+export function DetailsModal({
   suggestion,
   known,
   onClose,
@@ -235,7 +237,12 @@ function DetailsModal({
       <div className="modal">
         <h2>{suggestion.title}</h2>
         <p className="sugg-provenance">
-          {known ? `⭐ From your library: ${known.title}` : "✨ New to you"} · ⏱{" "}
+          {suggestion.recipe
+            ? `📖 Recipe from ${suggestion.recipe.source ?? "the web"}`
+            : known
+              ? `⭐ From your library: ${known.title}`
+              : "✨ New to you"}{" "}
+          · ⏱{" "}
           {suggestion.prepTimeMinutes} min · ~{suggestion.estimatedCost} kr
         </p>
         {suggestion.recipe && (
@@ -281,7 +288,7 @@ function DetailsModal({
 
 // A selected card, carried in board order (day 1 → day N) into the review. The
 // key is pure frontend state — day index + position — never sent to the backend.
-type Selected = {
+export type Selected = {
   key: string;
   dayLabel: string;
   suggestion: Suggestion;
@@ -323,7 +330,7 @@ function tintMap(selected: Selected[]): Map<string, Tint> {
 // all ticked by default, with the day name and a count per group. Unticking
 // greys and strikes the row in place rather than hiding it, so nothing jumps
 // around. The confirm button counts what is ticked and disables at zero.
-function IngredientReview({
+export function IngredientReview({
   selected,
   onCancel,
   onConfirm,
@@ -553,7 +560,13 @@ function ArchiveModal({
   );
 }
 
-export function PlanWeek({ profile }: { profile: Profile }) {
+export function PlanWeek({
+  profile,
+  onSettingsSaved,
+}: {
+  profile: Profile;
+  onSettingsSaved: (profile: Profile) => void;
+}) {
   const [dishes, setDishes] = useState<Dish[]>([]);
   const [run, setRun] = useState<PlanningRun | null>(null);
   const [planning, setPlanning] = useState(false);
@@ -700,6 +713,17 @@ export function PlanWeek({ profile }: { profile: Profile }) {
           🕘 Past plans
         </button>
       </div>
+
+      {/* The Profile's saved planning settings, folded away until wanted. The
+          chip above bends them for one run; this panel changes the defaults. */}
+      <details className="plan-settings">
+        <summary>⚙ Planning settings</summary>
+        <PlanningSettingsForm
+          key={profile.id}
+          profile={profile}
+          onSaved={onSettingsSaved}
+        />
+      </details>
 
       {browsing && (
         <ArchiveModal onPick={loadRun} onClose={() => setBrowsing(false)} />
