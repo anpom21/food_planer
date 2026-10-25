@@ -12,7 +12,12 @@ export type PlanningSettings = {
   priority: string[];
   shops: string[];
   inspiration: string;
+  // How the planner uses imported online recipes: every suggestion, about
+  // half of them, or none.
+  recipeMode: RecipeMode;
 };
+
+export type RecipeMode = "only" | "mix" | "none";
 
 export type ProfileSummary = {
   id: string;
@@ -210,24 +215,52 @@ export function listDishes(): Promise<Dish[]> {
 // Recipes imported from recipe websites by `food-planer-recipes <site>`.
 // Read-only; each one links out to its source page for the full method.
 export type RecipeIngredient = {
-  text: string;
+  text: string; // the line as the recipe writes it
   group: string | null; // the sub-heading it sits under, e.g. "Til servering"
+  name: string; // the shopping item: "500 g porre, i ringe" → "porre"
+  quantity: string; // … and "500 g"
   have?: OnHand;
 };
 
+// An imported recipe shaped like a Suggestion card: what it'd cost roughly,
+// how many of its ingredients are in the fridge, the pantry or on offer, and
+// the offers themselves (as a Suggestion's discounts).
 export type Recipe = {
   source: string;
   url: string;
   title: string;
   thumbnail: string | null;
-  ingredients: RecipeIngredient[];
   servings: string | null;
   total_time: string | null;
   categories: string[];
+  description: string;
+  ingredients: RecipeIngredient[];
+  discounts: (Discount & { review?: boolean })[];
+  estimatedCost: number; // rough, DKK
+  prepTimeMinutes: number | null;
+  counts: { fresh: number; staple: number; offers: number };
+  recipe: SuggestionRecipe;
 };
 
-export function listRecipes(): Promise<Recipe[]> {
-  return fetch("/api/recipes").then((r) => json<Recipe[]>(r));
+// With a profile, the cards include this week's offers at its shops.
+export function listRecipes(profileId?: string): Promise<Recipe[]> {
+  const query = profileId ? `?profileId=${encodeURIComponent(profileId)}` : "";
+  return fetch(`/api/recipes${query}`).then((r) => json<Recipe[]>(r));
+}
+
+// A recipe card as a Suggestion, so the plan's Details and Add-ingredients
+// modals work on it unchanged.
+export function recipeAsSuggestion(recipe: Recipe): Suggestion {
+  return {
+    title: recipe.title,
+    description: recipe.description,
+    ingredients: recipe.ingredients.map(({ name, quantity, have }) => ({ name, quantity, have })),
+    estimatedCost: recipe.estimatedCost,
+    prepTimeMinutes: recipe.prepTimeMinutes ?? 0,
+    sourceDish: null,
+    discounts: recipe.discounts,
+    recipe: recipe.recipe,
+  };
 }
 
 // A dinner recipe the planner would consider this week, and why: the fresh
@@ -329,6 +362,16 @@ export type ShoppingRow = {
 
 export function getShoppingList(): Promise<ShoppingRow[]> {
   return fetch("/api/shopping-list").then((r) => json<ShoppingRow[]>(r));
+}
+
+// Remove rows from the list (every line behind each merged row); returns the
+// list as it now stands. Clearing everything is the same call with every id.
+export function removeShoppingRows(rows: ShoppingRow[]): Promise<ShoppingRow[]> {
+  return fetch("/api/shopping-list/items/remove", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lineIds: rows.flatMap((r) => r.lineIds) }),
+  }).then((r) => json<ShoppingRow[]>(r));
 }
 
 // The plain-text export the Copy-list modal previews. The backend owns the
@@ -480,6 +523,13 @@ export function addFridgeItems(items: ScannedItem[]): Promise<Fridge> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(items),
   }).then((r) => json<Fridge>(r));
+}
+
+// Empty one kind: every fresh item, or every pantry staple.
+export function clearFridge(kind: FridgeKind): Promise<Fridge> {
+  return fetch(`/api/fridge/items?kind=${kind}`, { method: "DELETE" }).then((r) =>
+    json<Fridge>(r),
+  );
 }
 
 export function removeFridgeItem(id: string): Promise<Fridge> {

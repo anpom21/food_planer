@@ -3,6 +3,7 @@ import {
   SHOPPING_LIST_CSV_URL,
   getShoppingList,
   getShoppingListText,
+  removeShoppingRows,
   type ShoppingRow,
 } from "./api";
 
@@ -79,6 +80,8 @@ export function ShoppingList() {
   const [error, setError] = useState<string | null>(null);
   const [copyText, setCopyText] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // Rows ticked for "Clear selected", keyed by their line ids.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     getShoppingList()
@@ -89,6 +92,30 @@ export function ShoppingList() {
   function flash(message: string) {
     setToast(message);
     setTimeout(() => setToast(null), 2600);
+  }
+
+  const rowKey = (row: ShoppingRow) => row.lineIds.join(",");
+
+  function togglePick(row: ShoppingRow) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      const key = rowKey(row);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  // Bought or no longer wanted: remove the rows (every line behind each).
+  async function clearRows(toClear: ShoppingRow[], label: string) {
+    if (toClear.length === 0) return;
+    try {
+      setRows(await removeShoppingRows(toClear));
+      setPicked(new Set());
+      flash(label);
+    } catch (e: unknown) {
+      setError(String(e));
+    }
   }
 
   async function openCopy() {
@@ -116,6 +143,7 @@ export function ShoppingList() {
   }
 
   const empty = rows.length === 0;
+  const pickedRows = rows.filter((row) => picked.has(rowKey(row)));
 
   return (
     <section className="library shopping">
@@ -145,6 +173,42 @@ export function ShoppingList() {
         </div>
       </header>
 
+      {!empty && (
+        <div className="shopping-actions">
+          <button
+            className="btn ghost"
+            onClick={() =>
+              setPicked(
+                pickedRows.length === rows.length ? new Set() : new Set(rows.map(rowKey)),
+              )
+            }
+          >
+            {pickedRows.length === rows.length ? "Deselect all" : "Select all"}
+          </button>
+          <button
+            className="btn"
+            disabled={pickedRows.length === 0}
+            onClick={() =>
+              clearRows(
+                pickedRows,
+                `${pickedRows.length} item${pickedRows.length === 1 ? "" : "s"} cleared`,
+              )
+            }
+          >
+            Clear selected{pickedRows.length > 0 ? ` (${pickedRows.length})` : ""}
+          </button>
+          <button
+            className="btn danger"
+            onClick={() => {
+              if (window.confirm(`Clear all ${rows.length} items from the shopping list?`))
+                void clearRows(rows, "Shopping list cleared");
+            }}
+          >
+            Clear all
+          </button>
+        </div>
+      )}
+
       {empty ? (
         <p className="muted">
           Nothing on the list yet — add ingredients from a planned week.
@@ -155,7 +219,16 @@ export function ShoppingList() {
             const dishes = row.sources.filter((s) => s.dishTitle);
             const shared = dishes.length > 1;
             return (
-              <li key={row.lineIds.join(",")} className="shopping-row">
+              <li
+                key={rowKey(row)}
+                className={`shopping-row${picked.has(rowKey(row)) ? " picked" : ""}`}
+              >
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${row.name}`}
+                  checked={picked.has(rowKey(row))}
+                  onChange={() => togglePick(row)}
+                />
                 <span className="shopping-name">{row.name}</span>
                 {row.totalQuantity && (
                   <span className="shopping-total">{row.totalQuantity}</span>

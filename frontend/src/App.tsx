@@ -373,7 +373,7 @@ export function App() {
           aria-current={screen === "recipes"}
           style={{ fontWeight: screen === "recipes" ? 700 : 400 }}
         >
-          Opskrifter
+          Inspiration
         </button>
         <button
           onClick={() => setScreen("shopping")}
@@ -397,18 +397,16 @@ export function App() {
           Settings
         </button>
       </nav>
-      {screen === "plan" && <PlanWeek key={profile.id} profile={profile} />}
+      {screen === "plan" && (
+        <PlanWeek key={profile.id} profile={profile} onSettingsSaved={setProfile} />
+      )}
       {screen === "fridge" && <Fridge />}
       {screen === "library" && <DishLibrary />}
-      {screen === "recipes" && <Recipes key={profile.id} profileId={profile.id} />}
+      {screen === "recipes" && <Recipes key={profile.id} profile={profile} />}
       {screen === "shopping" && <ShoppingList />}
       {screen === "offers" && <Offers key={profile.id} profile={profile} />}
       {screen === "settings" && (
-        <SettingsScreen
-          key={profile.id}
-          profile={profile}
-          onSaved={(p) => setProfile(p)}
-        />
+        <SettingsScreen key={profile.id} profile={profile} />
       )}
     </main>
   );

@@ -195,9 +195,15 @@ def test_api_lists_imported_recipes(client, data_dir: Path) -> None:
     recipes = client.get("/api/recipes").json()
 
     assert [r["title"] for r in recipes] == ["Ret 0", "Ret 1"]
-    assert set(recipes[0]) == {
-        "source", "url", "title", "thumbnail", "ingredients", "servings", "total_time", "categories",
+    card = recipes[0]
+    assert card["ingredients"][2] == {
+        "text": "4 skiver rugbrød", "group": "Til servering",
+        "name": "rugbrød", "quantity": "4 skiver", "have": None,
     }
-    assert recipes[0]["ingredients"][2] == {
-        "text": "4 skiver rugbrød", "group": "Til servering", "have": None,
-    }
+    # Shaped like a Suggestion card: a rough price (nothing in the house, no
+    # offers without a profile: 3 items × 20 kr), counts and the recipe link.
+    assert card["estimatedCost"] == 60
+    assert card["counts"] == {"fresh": 0, "staple": 0, "offers": 0}
+    assert card["prepTimeMinutes"] == 30
+    assert card["description"] == "Lækker suppe."
+    assert card["recipe"]["url"] == "https://v.test/ret-0/"

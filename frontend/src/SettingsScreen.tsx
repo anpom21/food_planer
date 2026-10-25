@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   listShops,
   saveSettings,
+  type RecipeMode,
   shopIconUrl,
   type PlanningSettings,
   type Profile,
@@ -259,7 +260,16 @@ function ShopPicker({
   );
 }
 
-export function SettingsScreen({
+// The three ways the planner can use imported online recipes.
+const RECIPE_MODES: { mode: RecipeMode; label: string; hint: string }[] = [
+  { mode: "only", label: "Only online recipes", hint: "every dish is a recipe" },
+  { mode: "mix", label: "Half and half", hint: "about half the dishes" },
+  { mode: "none", label: "No online recipes", hint: "library and new dishes only" },
+];
+
+// The Profile's planning settings, edited as a draft and saved together. Lives
+// on the Plan tab, right where the week is planned.
+export function PlanningSettingsForm({
   profile,
   onSaved,
 }: {
@@ -273,7 +283,6 @@ export function SettingsScreen({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [promptOpen, setPromptOpen] = useState(false);
 
   const patch = (fields: Partial<PlanningSettings>) => {
     setDraft((prev) => ({ ...prev, ...fields }));
@@ -311,7 +320,6 @@ export function SettingsScreen({
 
   return (
     <form className="settings" onSubmit={submit}>
-      <h1>Planning settings</h1>
       <p className="muted">
         Your preferences, yours alone — used every time you plan a week.
       </p>
@@ -377,6 +385,28 @@ export function SettingsScreen({
       />
 
       <section className="settings-card">
+        <label>
+          Online recipes{" "}
+          <span className="hint">— dishes taken 1:1 from imported recipes</span>
+        </label>
+        <div className="mode-pills" role="radiogroup" aria-label="Online recipes">
+          {RECIPE_MODES.map(({ mode, label, hint }) => (
+            <button
+              key={mode}
+              type="button"
+              role="radio"
+              aria-checked={(draft.recipeMode ?? "mix") === mode}
+              className={`mode-pill${(draft.recipeMode ?? "mix") === mode ? " on" : ""}`}
+              onClick={() => patch({ recipeMode: mode })}
+            >
+              <strong>{label}</strong>
+              <span>{hint}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="settings-card">
         <label htmlFor="inspiration">
           Inspiration{" "}
           <span className="hint">— steer invented dishes in your own words</span>
@@ -389,6 +419,28 @@ export function SettingsScreen({
         />
       </section>
 
+      <div className="settings-actions">
+        <button className="btn primary" type="submit" disabled={busy}>
+          {busy ? "Saving…" : "Save settings"}
+        </button>
+        {saved && <span className="saved-note">Saved ✓</span>}
+        {error && <span className="error">{error}</span>}
+      </div>
+    </form>
+  );
+}
+
+// The Settings tab: what's shared by the whole household rather than one
+// person's planning preferences (those live on the Plan tab).
+export function SettingsScreen({ profile }: { profile: Profile }) {
+  const [promptOpen, setPromptOpen] = useState(false);
+  return (
+    <div className="settings">
+      <h1>Settings</h1>
+      <p className="muted">
+        Your planning settings now live on the Plan tab, under ⚙ Planning
+        settings.
+      </p>
       <section className="settings-card prompt-card">
         <div>
           <label>
@@ -416,14 +468,6 @@ export function SettingsScreen({
           onClose={() => setPromptOpen(false)}
         />
       )}
-
-      <div className="settings-actions">
-        <button className="btn primary" type="submit" disabled={busy}>
-          {busy ? "Saving…" : "Save settings"}
-        </button>
-        {saved && <span className="saved-note">Saved ✓</span>}
-        {error && <span className="error">{error}</span>}
-      </div>
-    </form>
+    </div>
   );
 }

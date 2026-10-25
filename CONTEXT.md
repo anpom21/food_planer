@@ -52,7 +52,7 @@ The pick-list per kind: a built-in basic set plus every name the Household has a
 Photos sent once to the LLM, which returns named, classified items for the Household to review before any are added. The photos are not kept.
 
 **PlanningSettings**:
-Per-Profile configuration for a planning run: number of days to plan, suggestions per day (default 3/day), known-vs-unknown dish preference, priority order (cheap / quick & easy / delicious / healthy), preferred shops, and Inspiration text.
+Per-Profile configuration for a planning run: number of days to plan, suggestions per day (default 3/day), known-vs-unknown dish preference, priority order (cheap / quick & easy / delicious / healthy), preferred shops, Inspiration text, and how much to use online recipes (only / half and half / none).
 
 **PlanningRun**:
 One invocation of the LLM for a given Profile, producing a set of Suggestions for the configured number of days.
@@ -70,7 +70,7 @@ The set of Offers gathered for a single PlanningRun, filtered down to food and r
 _Avoid_: Discounts, offer list
 
 **Imported recipe**:
-A recipe scraped from a recipe website (valdemarsro.dk so far) into local JSON: title, link, thumbnail, ingredient lines, instructions, times, servings. Not part of the Household's Dish library. A PlanningRun only sees the dinner ones that use a fresh item or an Offer, ranked and capped; a Suggestion based on one links back to it (its `recipe`).
+A recipe scraped from a recipe website (valdemarsro.dk so far) into local JSON: title, link, thumbnail, ingredient lines, instructions, times, servings. Not part of the Household's Dish library. A PlanningRun only sees the dinner ones that use a fresh item or an Offer, ranked and capped. A Suggestion based on one *is* that recipe, 1:1 — title, ingredient lines, time and rough price come from the recipe, not the model — and links back to it (its `recipe`). Browsed on the Inspiration screen.
 _Avoid_: Dish (that's the Household's own library), Recipe on its own (ambiguous with a Dish's recipe text)
 
 **On hand**:

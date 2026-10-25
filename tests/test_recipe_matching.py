@@ -219,21 +219,23 @@ def _suggestion(title: str, source_recipe: str | None, *ingredients: str) -> dic
     }
 
 
-def test_a_suggestion_links_to_its_recipe_with_real_times(
+def test_a_recipe_dish_is_the_recipe_1_to_1(
     client, fake_openai, fake_tjek, data_dir: Path
 ) -> None:
     profile_id = _setup(client, fake_tjek, data_dir)
-    soup = _recipe("Porresuppe", "500 g porre, i ringe")
+    soup = _recipe("Porresuppe", "500 g porre, i ringe", "500 g hakket oksekød")
     soup.update(thumbnail="https://r.test/porre.jpg", total_time="1 time 10 min.",
-                work_time="20 min.", servings="4 pers.")
+                work_time="20 min.", servings="4 pers.",
+                description="En cremet suppe.\n\nLang blogtekst her.")
     _store_recipes(data_dir, [soup])
     fake_openai.canned = {
         "days": [
             {
                 "day": 1,
                 "suggestions": [
-                    # Brackets copied from the prompt are fine.
-                    _suggestion("Porresuppe", "[r1]", "porre", "salt", "rugbrød"),
+                    # The model's own title and ingredients are replaced by the
+                    # recipe's; brackets copied from the prompt are fine.
+                    _suggestion("Min porresuppe", "[r1]", "porre", "salt", "rugbrød"),
                     _suggestion("Opfundet ret", "r9"),  # a ref the prompt never had
                 ],
             }
@@ -252,13 +254,26 @@ def test_a_suggestion_links_to_its_recipe_with_real_times(
         "workTime": "20 min.",
         "servings": "4 pers.",
     }
+    assert linked["title"] == "Porresuppe"
+    assert linked["description"] == "En cremet suppe."  # first paragraph only
     assert linked["prepTimeMinutes"] == 70  # the recipe's time, not the model's 25
+    # The recipe's lines, parsed into shopping items and marked; the minced
+    # beef is on offer (matched by name against the recipe, not the model).
+    assert linked["ingredients"] == [
+        {"name": "porre", "quantity": "500 g", "have": "fresh"},
+        {"name": "hakket oksekød", "quantity": "500 g", "have": None},
+    ]
+    assert [(d["matchedIngredient"], d["matchedBy"]) for d in linked["discounts"]] == [
+        ("hakket oksekød", "name")
+    ]
+    # Our rough price, as on its Inspiration card: the 35 kr offer (porre is
+    # in the fridge, so free) — not the model's 60 kr.
+    assert linked["estimatedCost"] == 35
+    assert invented["estimatedCost"] == 60
     assert "sourceRecipe" not in linked
     assert invented["recipe"] is None
+    assert invented["title"] == "Opfundet ret"
     assert invented["prepTimeMinutes"] == 25
-    # porre is in the fridge (Leek); salt and rugbrød are neither fresh nor staples here.
-    haves = {i["name"]: i["have"] for i in linked["ingredients"]}
-    assert haves == {"porre": "fresh", "salt": None, "rugbrød": None}
 
 
 def test_ingredients_we_have_are_marked_fresh_or_staple(
@@ -293,3 +308,89 @@ def test_uncertain_recipe_offers_are_marked_for_the_planner_to_check(
     assert '"check offer" marks a product that may not be the ingredient' in prompt
     matches = client.get("/api/recipes/matches", params={"profileId": profile_id}).json()
     assert matches[0]["offers"][0]["review"] is True
+
+
+# --- Online-recipe modes, cards ----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("line", "item"),
+    [
+        ("500 g porre, i ringe", {"name": "porre", "quantity": "500 g"}),
+        ("1 dåse grønne linser, drænet", {"name": "grønne linser", "quantity": "1 dåse"}),
+        ("2-3 fed hvidløg", {"name": "hvidløg", "quantity": "2-3 fed"}),
+        ("1½ liter grøntsagsbouillon", {"name": "grøntsagsbouillon", "quantity": "1½ liter"}),
+        ("3 æg", {"name": "æg", "quantity": "3"}),
+        ("salt og friskkværnet peber", {"name": "salt og friskkværnet peber", "quantity": ""}),
+    ],
+)
+def test_a_recipe_line_parses_into_a_shopping_item(line: str, item: dict[str, str]) -> None:
+    from food_planer.recipes.matching import parse_ingredient_line
+
+    assert parse_ingredient_line(line) == item
+
+
+def _set_mode(client, profile_id: str, mode: str, days: int = 1, per_day: int = 1) -> None:
+    client.put(
+        f"/api/profiles/{profile_id}/settings",
+        json={"daysToPlan": days, "suggestionsPerDay": per_day, "shops": ["netto"], "recipeMode": mode},
+    )
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("only", "Every suggestion must be one of these recipes"),
+        ("mix", "Base about half of the suggestions on these recipes"),
+    ],
+)
+def test_the_recipe_mode_sets_how_many_dishes_are_recipes(
+    client, fake_openai, fake_tjek, data_dir: Path, mode: str, expected: str
+) -> None:
+    profile_id = _setup(client, fake_tjek, data_dir)
+    _set_mode(client, profile_id, mode)
+    fake_openai.canned = {"days": []}
+
+    client.post("/api/planning-runs", json={"profileId": profile_id})
+
+    prompt = fake_openai.prompts[-1]
+    assert expected in prompt
+    assert "] Porresuppe" in prompt
+    # With only recipes, the library lean is dropped; otherwise it stays.
+    assert ("Lean " in prompt or "Balance " in prompt) == (mode == "mix")
+
+
+def test_no_online_recipes_leaves_them_out_entirely(
+    client, fake_openai, fake_tjek, data_dir: Path
+) -> None:
+    profile_id = _setup(client, fake_tjek, data_dir)
+    _set_mode(client, profile_id, "none")
+    fake_openai.canned = {"days": []}
+
+    client.post("/api/planning-runs", json={"profileId": profile_id})
+
+    assert "Porresuppe" not in fake_openai.prompts[-1]
+    assert "sourceRecipe" not in fake_openai.prompts[-1]
+    matches = client.get("/api/recipes/matches", params={"profileId": profile_id}).json()
+    assert matches and not any(m["inPrompt"] for m in matches)
+
+
+def test_recipe_cards_count_what_we_have_and_whats_on_offer(
+    client, fake_tjek, data_dir: Path
+) -> None:
+    profile_id = _setup(client, fake_tjek, data_dir)  # Leek fresh, Onions staple
+    _store_recipes(
+        data_dir,
+        [_recipe("Chili", "2 porrer", "1 løg", "500 g hakket oksekød", "1 dåse bønner")],
+    )
+
+    (card,) = client.get("/api/recipes", params={"profileId": profile_id}).json()
+
+    assert card["counts"] == {"fresh": 1, "staple": 1, "offers": 1}
+    assert [i["have"] for i in card["ingredients"]] == ["fresh", "staple", None, None]
+    (discount,) = card["discounts"]
+    assert discount["matchedIngredient"] == "hakket oksekød"
+    assert discount["productName"] == "Hakket oksekød 8-12%"
+    # Rough price: the offer's 35 kr + 20 kr for the beans; what we have is free.
+    assert card["estimatedCost"] == 55
+    assert client.get("/api/recipes", params={"profileId": "nobody"}).status_code == 404

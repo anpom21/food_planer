@@ -244,6 +244,105 @@ def recipe_link(recipe: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# A rough price for a recipe, in DKK: what each ingredient still to buy costs
+# on offer this week, or this much when it isn't on offer. Anything we have
+# costs nothing. Deliberately crude — a pack price, not the share a recipe uses.
+UNPRICED_ITEM_KR = 20.0
+
+_LEADING_AMOUNT = re.compile(
+    r"^(?:ca\.?\s*)?[\d½¼¾⅓⅔][\d½¼¾⅓⅔.,/\-–\s]*"
+    r"(?:(?:" + "|".join(sorted((re.escape(u) for u in _UNITS), key=len, reverse=True)) + r")\b\.?)?",
+    re.IGNORECASE,
+)
+
+
+def rough_cost(ingredients: list[dict[str, Any]], discounts: list[dict[str, Any]]) -> int:
+    """The rough price of a list of shopping items (``name``, ``have``) given
+    the offers tied to them (``matchedIngredient``, ``price``): each offer's
+    price, :data:`UNPRICED_ITEM_KR` for anything else to buy, nothing for what
+    we have. Used for recipe cards and recipe dishes alike, so the same recipe
+    costs the same on the Inspiration screen and on the plan."""
+    priced = {d.get("matchedIngredient"): d.get("price") for d in discounts}
+    return round(
+        sum(priced.get(i["name"]) or UNPRICED_ITEM_KR for i in ingredients if not i.get("have"))
+    )
+
+
+def parse_ingredient_line(line: str) -> dict[str, str]:
+    """A recipe line as a shopping item: "500 g porre, i ringe" →
+    ``{"name": "porre", "quantity": "500 g"}``. The amount and unit lead the
+    line; the name runs to the first comma or bracket (preparation notes).
+    A line without an amount ("salt og peber") keeps it all as the name."""
+    text = " ".join(line.split())
+    found = _LEADING_AMOUNT.match(text)
+    quantity = found.group(0).strip() if found else ""
+    rest = text[found.end():] if found else text
+    name = re.split(r"[,(]", rest, maxsplit=1)[0].strip(" .") or rest.strip()
+    return {"name": name, "quantity": quantity}
+
+
+def first_paragraph(text: str | None) -> str:
+    return (text or "").split("\n\n", 1)[0].strip()
+
+
+def recipe_items(recipe: dict[str, Any], on_hand: OnHand) -> list[dict[str, Any]]:
+    """Every ingredient line of a recipe, parsed and marked: the line itself
+    (``text``, ``group``), the shopping item (``name``, ``quantity``) and
+    whether we have it (``have``)."""
+    items = []
+    for ingredient in recipe.get("ingredients", []):
+        parsed = parse_ingredient_line(ingredient["text"])
+        items.append(
+            {
+                "text": ingredient["text"],
+                "group": ingredient.get("group"),
+                **parsed,
+                "have": on_hand.kind(ingredient_name(ingredient["text"])),
+            }
+        )
+    return items
+
+
+def recipe_card(
+    recipe: dict[str, Any], match: RecipeMatch | None, on_hand: OnHand
+) -> dict[str, Any]:
+    """A recipe shaped like a Suggestion card: parsed, marked ingredients, the
+    offers it uses (denormalized like a Suggestion's discounts, each tied to
+    its ingredient's item name), how many ingredients are in the fridge, the
+    pantry or on offer, and a rough price."""
+    from ..discounts import denormalize_discount
+
+    items = recipe_items(recipe, on_hand)
+    by_core = {o["ingredient"]: o for o in (match.offers if match else [])}
+    discounts: list[dict[str, Any]] = []
+    for item in items:
+        if item["have"]:
+            continue
+        found = by_core.pop(ingredient_name(item["text"]), None)
+        if found is None:
+            continue
+        offer = found["offer"]
+        discount = denormalize_discount(
+            offer, item["name"], "review" if found["review"] else "name"
+        )
+        discount["review"] = found["review"]
+        discounts.append(discount)
+    return {
+        **{k: recipe.get(k) for k in ("source", "url", "title", "thumbnail", "servings", "total_time", "categories")},
+        "description": first_paragraph(recipe.get("description")),
+        "ingredients": items,
+        "discounts": discounts,
+        "estimatedCost": rough_cost(items, discounts),
+        "prepTimeMinutes": minutes(recipe.get("total_time")),
+        "counts": {
+            "fresh": sum(1 for i in items if i["have"] == "fresh"),
+            "staple": sum(1 for i in items if i["have"] == "staple"),
+            "offers": len(discounts),
+        },
+        "recipe": recipe_link(recipe),
+    }
+
+
 def _offer_for_name(name: str, offers: list[dict[str, Any]]) -> dict[str, Any] | None:
     """The offer for an ingredient name. Only headings containing the name's
     longest word are passed on, which keeps the regex matching cheap."""

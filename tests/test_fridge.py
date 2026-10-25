@@ -142,3 +142,24 @@ def test_the_planning_prompt_names_fresh_items_and_staples(client, fake_openai) 
 def test_an_empty_fridge_leaves_no_trace_in_the_prompt(client, fake_openai) -> None:
     client.post("/api/planning-runs", json={"profileId": _profile(client)})
     assert "at home" not in fake_openai.prompts[-1]
+
+
+def test_clear_empties_one_kind_and_keeps_the_names(client) -> None:
+    client.post(
+        "/api/fridge/items",
+        json=[
+            {"name": "Milk", "kind": "fresh"},
+            {"name": "Chicken", "kind": "fresh"},
+            {"name": "Rice", "kind": "staple"},
+        ],
+    )
+
+    body = client.delete("/api/fridge/items", params={"kind": "fresh"}).json()
+
+    assert body["fresh"] == []
+    assert [i["name"] for i in body["staples"]] == ["Rice"]
+    # Still one tap away: cleared names come back as common items.
+    assert {"Milk", "Chicken"} <= set(body["common"]["fresh"])
+    body = client.delete("/api/fridge/items", params={"kind": "staple"}).json()
+    assert body["staples"] == []
+    assert client.delete("/api/fridge/items", params={"kind": "nope"}).status_code == 422

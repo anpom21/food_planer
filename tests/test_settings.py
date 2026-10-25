@@ -31,6 +31,7 @@ EDITED = {
     "priority": ["healthy", "delicious", "quick", "cheap"],
     "shops": [],
     "inspiration": "more Vietnamese food, less pasta",
+    "recipeMode": "only",
 }
 
 
