@@ -44,13 +44,21 @@ export type SuggestionIngredient = {
   quantity: string; // free text: "200 g", "1 pinch"
 };
 
+// One offer a Suggestion draws on, denormalized in full when the run was made
+// so an archived plan still shows it after it expires. `matchedIngredient`
+// names the ingredient it covers, as written in the Suggestion's list.
 export type Discount = {
+  offerId: string;
   productName: string;
+  description: string | null;
   shop: string;
-  price: number;
-  originalPrice: number;
-  discountPercent: number;
-  validUntil: string;
+  price: number | null;
+  originalPrice: number | null;
+  discountPercent: number | null;
+  unitSize: string | null;
+  validFrom: string | null;
+  validUntil: string | null;
+  imageUrl: string | null;
   matchedIngredient: string | null;
 };
 
@@ -81,6 +89,12 @@ export type PlanningRun = {
   fridgeSnippet: string;
   requestedDays: number | null;
   requestedSuggestionsPerDay: number | null;
+  // How many offers the model was shown, and preferred chains whose
+  // tilbudsavis couldn't be fetched (absent on runs made before offers).
+  offerCount?: number;
+  offersUnavailable?: string[];
+  // Why the model call failed (a timeout, an API outage), on a failed run.
+  error?: string | null;
 };
 
 // A row of the Past-plans archive (issue #26). The list endpoint ships these
@@ -282,4 +296,138 @@ export function deleteDish(id: string): Promise<void> {
     // The backend answers 204, but any 2xx counts as success (r.ok covers it).
     if (!r.ok) throw new Error(r.statusText);
   });
+}
+
+// The planning prompt: one household-wide template. Values derived from the
+// library and a Profile's settings are injected wherever a {{variable}}
+// appears; the backend refuses a template naming a variable it can't fill.
+export type PromptVariable = { name: string; description: string };
+
+export type PromptConfig = {
+  template: string;
+  isDefault: boolean;
+  defaultTemplate: string;
+  // How many tilbudsavis offers the prompt lists (0 = none).
+  offerLimit: number;
+  defaultOfferLimit: number;
+  offerLimitCeiling: number;
+  variables: PromptVariable[];
+};
+
+// One piece of a rendered prompt: the template's own text (variable null) or
+// the value injected for a {{variable}}.
+export type PromptSegment = { text: string; variable: string | null };
+
+export function getPrompt(): Promise<PromptConfig> {
+  return fetch("/api/prompt").then((r) => json<PromptConfig>(r));
+}
+
+// A full replace: `null` for either resets it to the built-in default.
+export function savePrompt(
+  template: string | null,
+  offerLimit: number | null,
+): Promise<PromptConfig> {
+  return fetch("/api/prompt", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ template, offerLimit }),
+  }).then((r) => json<PromptConfig>(r));
+}
+
+// Render a draft template for a Profile without saving it or calling the model.
+export function previewPrompt(
+  profileId: string,
+  template: string,
+  offerLimit: number,
+): Promise<PromptSegment[]> {
+  return fetch("/api/prompt/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profileId, template, offerLimit }),
+  })
+    .then((r) => json<{ segments: PromptSegment[] }>(r))
+    .then((b) => b.segments);
+}
+
+// One product on offer in a chain's tilbudsavis, in the spec's Offer shape.
+// `pre_price` is only set when a markdown is advertised, and so is
+// `discount_percent`; most offers are a flat weekly price.
+export type Offer = {
+  id: string;
+  source: "tjek_api";
+  item_name: string;
+  description: string | null;
+  shop: string;
+  price: number | null;
+  pre_price: number | null;
+  discount_percent: number | null;
+  currency: string;
+  unit_size: string | null;
+  valid_from: string | null;
+  valid_to: string | null;
+  image_url: string | null;
+  fetched_at: string;
+};
+
+// `dealer` is null for a chain the tilbudsavis doesn't carry.
+export type ShopOffers = {
+  shop: { slug: string; name: string };
+  dealer: { id: string; name: string } | null;
+  offers: Offer[];
+  fetchedAt: string | null;
+};
+
+export function getShopOffers(slug: string): Promise<ShopOffers> {
+  return fetch(`/api/shops/${encodeURIComponent(slug)}/offers`).then((r) =>
+    json<ShopOffers>(r),
+  );
+}
+
+// What is in the fridge: household-shared. Fresh items keep for less than
+// about a month and come and go by hand or by a photo scan; pantry staples
+// keep longer and are assumed always in the house. `common` lists, per kind,
+// the basic items plus every name added before, minus what's already in.
+export type FridgeKind = "fresh" | "staple";
+
+export type FridgeItem = {
+  id: string;
+  name: string;
+  kind: FridgeKind;
+  addedAt: string;
+};
+
+export type Fridge = {
+  fresh: FridgeItem[];
+  staples: FridgeItem[];
+  common: Record<FridgeKind, string[]>;
+};
+
+export type ScannedItem = { name: string; kind: FridgeKind };
+
+export function getFridge(): Promise<Fridge> {
+  return fetch("/api/fridge").then((r) => json<Fridge>(r));
+}
+
+export function addFridgeItems(items: ScannedItem[]): Promise<Fridge> {
+  return fetch("/api/fridge/items", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(items),
+  }).then((r) => json<Fridge>(r));
+}
+
+export function removeFridgeItem(id: string): Promise<Fridge> {
+  return fetch(`/api/fridge/items/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }).then((r) => json<Fridge>(r));
+}
+
+// Send photos to be read by the model. Nothing is saved: the caller reviews
+// the returned list and adds what's right with addFridgeItems.
+export function scanFridge(images: Blob[]): Promise<ScannedItem[]> {
+  const form = new FormData();
+  images.forEach((img, i) => form.append("images", img, `photo-${i + 1}.jpg`));
+  return fetch("/api/fridge/scan", { method: "POST", body: form })
+    .then((r) => json<{ items: ScannedItem[] }>(r))
+    .then((b) => b.items);
 }

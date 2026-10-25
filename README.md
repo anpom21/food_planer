@@ -39,6 +39,19 @@ A single worker is required: the persistence layer keeps one in-memory cache
 per file, so a second worker would read stale data. `data/` is resolved
 relative to the process's working directory.
 
+## Logs
+
+Every planning run logs, to the server's stdout: the settings it used, how
+many tilbudsavis offers were found and shown to the model (per shop), the full
+prompt, the model's raw output, and a summary (status, offers cited by the
+model vs. matched by ingredient name). `FOOD_PLANNER_LOG_LEVEL` sets the level
+(`INFO` default; `DEBUG` adds offer-cache hits; `WARNING` quietens it).
+
+Each run also writes the same detail as one JSON file to
+`data/run_logs/<run id>.json` — the first place to look when a plan looks
+wrong. Running in the background, keep stdout too:
+`nohup uv run food-planer > food-planer.log 2>&1 &`.
+
 ## Develop
 
 Run the API and the Vite dev server side by side. The dev server proxies

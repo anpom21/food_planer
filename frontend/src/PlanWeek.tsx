@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { BiasSlider, Stepper } from "./SettingsScreen";
+import { OfferCard, OfferTag, offerFor } from "./OfferTag";
 import {
   addShoppingItems,
   getPlanningRun,
@@ -222,12 +223,26 @@ function DetailsModal({
         <p>{suggestion.description}</p>
         <h3>Ingredients</h3>
         <ul className="ing-list">
-          {suggestion.ingredients.map((ing, i) => (
-            <li key={i}>
-              <span className="ing-q">{ing.quantity}</span> {ing.name}
-            </li>
-          ))}
+          {suggestion.ingredients.map((ing, i) => {
+            const offer = offerFor(ing, suggestion.discounts);
+            return (
+              <li key={i}>
+                <span className="ing-q">{ing.quantity}</span> {ing.name}
+                {offer && <OfferTag offer={offer} />}
+              </li>
+            );
+          })}
         </ul>
+        {suggestion.discounts.length > 0 && (
+          <>
+            <h3>On offer this week</h3>
+            <div className="offer-strip">
+              {suggestion.discounts.map((d) => (
+                <OfferCard key={d.offerId} offer={d} />
+              ))}
+            </div>
+          </>
+        )}
         <div className="modal-actions">
           <button className="btn primary" onClick={onClose}>
             Close
@@ -385,6 +400,10 @@ function IngredientReview({
                     />
                     <span className="ing-row-q">{ing.quantity}</span>
                     <span className="ing-row-nm">{ing.name}</span>
+                    {(() => {
+                      const offer = offerFor(ing, s.suggestion.discounts);
+                      return offer && <OfferTag offer={offer} />;
+                    })()}
                     {t && <span className="ing-row-dup">in {t.count} dishes</span>}
                   </label>
                 );
@@ -486,7 +505,7 @@ function ArchiveModal({
                     <div className="archive-fridge muted">
                       {r.fridgeSnippet
                         ? `🧊 ${r.fridgeSnippet}`
-                        : "🧊 No fridge notes"}
+                        : "🧊 No fresh items"}
                     </div>
                   </button>
                 </li>
@@ -508,6 +527,19 @@ export function PlanWeek({ profile }: { profile: Profile }) {
   const [dishes, setDishes] = useState<Dish[]>([]);
   const [run, setRun] = useState<PlanningRun | null>(null);
   const [planning, setPlanning] = useState(false);
+  // Seconds since "Plan my week" was pressed, so a slow run reads as working
+  // rather than stuck.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!planning) return;
+    setElapsed(0);
+    const started = Date.now();
+    const tick = window.setInterval(
+      () => setElapsed(Math.floor((Date.now() - started) / 1000)),
+      1000,
+    );
+    return () => window.clearInterval(tick);
+  }, [planning]);
   const [error, setError] = useState<string | null>(null);
   // A suggestion open in the Details modal, or null when it's closed.
   const [details, setDetails] = useState<Suggestion | null>(null);
@@ -618,7 +650,7 @@ export function PlanWeek({ profile }: { profile: Profile }) {
           onClick={handlePlan}
           disabled={planning}
         >
-          {planning ? "Asking the model…" : "⚡ Plan my week"}
+          {planning ? `Asking the model… ${elapsed}s` : "⚡ Plan my week"}
         </button>
         <button
           className={
@@ -665,9 +697,18 @@ export function PlanWeek({ profile }: { profile: Profile }) {
         </div>
       )}
 
+      {run && (run.offersUnavailable?.length ?? 0) > 0 && (
+        <div className="banner">
+          🏷️ Couldn't fetch the tilbudsavis for{" "}
+          {run.offersUnavailable!.join(", ")} — this plan was made without
+          those offers.
+        </div>
+      )}
+
       {run && run.status === "failed" && (
         <div className="banner error">
-          The model couldn't produce a plan this time.
+          The model couldn't produce a plan this time
+          {run.error ? ` (${run.error})` : ""}.
           <button className="btn" onClick={handlePlan}>
             Try again
           </button>

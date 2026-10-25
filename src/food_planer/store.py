@@ -33,7 +33,13 @@ ENTITY_DEFAULTS: dict[str, Any] = {
     "dishes": [],
     "planning_runs": [],
     "fridge_context": {"text": "", "images": []},
+    # What is in the house: fresh items and pantry staples, plus every name
+    # added before so the common-items list learns the household's habits.
+    "fridge": {"items": [], "history": []},
     "shopping_list": {"items": []},
+    # The household's edited planning prompt and how many offers it carries;
+    # null means the built-in default for either.
+    "prompt": {"template": None, "offerLimit": None},
 }
 
 

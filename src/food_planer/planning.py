@@ -11,7 +11,11 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 from typing import Any
+
+from .discounts import offer_line
+from .fridge import fridge_prompt_values
 
 # OpenAI's cheapest Structured-Outputs-capable model at time of writing. The
 # spec insists this be config, not a literal, so the spec doesn't go stale as
@@ -39,27 +43,17 @@ _INGREDIENT = {
     "required": ["name", "quantity"],
 }
 
+# The model only points at an offer from the prompt's list by its short [id]
+# and names the ingredient it covers; the backend swaps in the real offer
+# (price, image, dates), so nothing about an offer is ever made up.
 _DISCOUNT = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
-        "productName": {"type": "string"},
-        "shop": {"type": "string"},
-        "price": {"type": "number"},
-        "originalPrice": {"type": "number"},
-        "discountPercent": {"type": "number"},
-        "validUntil": {"type": "string"},
+        "offerId": {"type": "string"},
         "matchedIngredient": {"type": ["string", "null"]},
     },
-    "required": [
-        "productName",
-        "shop",
-        "price",
-        "originalPrice",
-        "discountPercent",
-        "validUntil",
-        "matchedIngredient",
-    ],
+    "required": ["offerId", "matchedIngredient"],
 }
 
 _SUGGESTION = {
@@ -73,8 +67,16 @@ _SUGGESTION = {
         "prepTimeMinutes": {"type": "integer"},
         # null means an unknown dish the model invented; a string is a Dish id.
         "sourceDish": {"type": ["string", "null"]},
-        # Denormalized offers; populated by the discount ticket, empty for now.
-        "discounts": {"type": "array", "items": _DISCOUNT},
+        # References into this run's offers; denormalized by the backend.
+        "discounts": {
+            "type": "array",
+            "description": (
+                "Every offer from the prompt's offer list this dish uses: one "
+                "entry per offer, with the offer's [id] as offerId and the "
+                "ingredient it covers. Empty only if it uses none."
+            ),
+            "items": _DISCOUNT,
+        },
     },
     "required": [
         "title",
@@ -105,9 +107,23 @@ _PLAN = {
 }
 
 
-def planning_json_schema() -> dict[str, Any]:
-    """The root schema — an object with a nested ``days`` array, strict-clean."""
-    return copy.deepcopy(_PLAN)
+def planning_json_schema(
+    days: int | None = None, suggestions_per_day: int | None = None
+) -> dict[str, Any]:
+    """The root schema — an object with a nested ``days`` array, strict-clean.
+
+    Given the run's numbers, both arrays are pinned to exactly that length with
+    ``minItems``/``maxItems`` (strict mode enforces them), so the model can't
+    hand back a short week and call it done.
+    """
+    schema = copy.deepcopy(_PLAN)
+    day_array = schema["properties"]["days"]
+    if days is not None:
+        day_array["minItems"] = day_array["maxItems"] = days
+    if suggestions_per_day is not None:
+        suggestions = day_array["items"]["properties"]["suggestions"]
+        suggestions["minItems"] = suggestions["maxItems"] = suggestions_per_day
+    return schema
 
 
 # --- Prompt composition -----------------------------------------------------
@@ -151,42 +167,179 @@ def _dish_block(dishes: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def compose_planning_prompt(
-    dishes: list[dict[str, Any]], settings: dict[str, Any]
-) -> str:
-    """Compose the single planning call from the library and the settings.
+# --- The editable prompt template --------------------------------------------
+# The prompt is a household-wide template the Settings screen can edit. Values
+# the backend derives from the library and the settings are injected wherever a
+# ``{{variable}}`` appears; the default template reproduces the hand-composed
+# prompt so an untouched install plans exactly as before.
+
+# Every variable a template may use, with the one-line description the editor
+# shows next to it. A template naming anything else is rejected on save.
+PROMPT_VARIABLES: dict[str, str] = {
+    "days": "Number of days to plan.",
+    "suggestions_per_day": "Number of dinner suggestions per day.",
+    "bias_instruction": "The known-vs-unknown lean, as an instruction.",
+    "priority_order": "The priority order as a comma-separated list.",
+    "priority_instruction": "The priority order, as an instruction (empty when unset).",
+    "inspiration": "The Inspiration text, as typed.",
+    "inspiration_instruction": "The Inspiration text, as an instruction (empty when unset).",
+    "dish_library": "The full Dish library, one dish per line with its [id].",
+    "offers": "This week's offers at your preferred shops, one per line with its [id].",
+    "offers_instruction": "The offers, with how to use and cite them (empty when there are none).",
+    "fridge_fresh": "The fresh items in the fridge, comma-separated.",
+    "pantry_staples": "The pantry staples always in the house, comma-separated.",
+    "fridge_instruction": "The fridge's fresh items and pantry staples, as an instruction (empty when both are empty).",
+}
+
+DEFAULT_PROMPT_TEMPLATE = """You are planning a household's week of dinners.
+
+Plan exactly {{days}} day(s), with {{suggestions_per_day}} dinner suggestion(s) per day.
+
+Return the whole week in one response so no dish repeats across days.
+
+For each suggestion set sourceDish to the [id] of the library dish it came from, or null when you invented a new dish.
+
+Write every ingredient name in Danish, the way Danish shops label it (e.g. "kyllingebryst", "hakket oksekød", "løg"), so it can be matched to this week's offers and shopped for.
+
+{{bias_instruction}}
+
+{{priority_instruction}}
+
+{{inspiration_instruction}}
+
+{{fridge_instruction}}
+
+{{offers_instruction}}
+
+Our dish library:
+
+{{dish_library}}"""
+
+_VARIABLE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
+
+
+def template_variables(template: str) -> list[str]:
+    """Every distinct ``{{variable}}`` name in a template, in first-use order."""
+    return list(dict.fromkeys(_VARIABLE.findall(template)))
+
+
+def unknown_variables(template: str) -> list[str]:
+    """The variables a template names that the planner can't fill."""
+    return [v for v in template_variables(template) if v not in PROMPT_VARIABLES]
+
+
+def _offers_block(offers: dict[str, dict[str, Any]]) -> str:
+    return "\n".join(offer_line(ref, offer) for ref, offer in offers.items())
+
+
+def prompt_values(
+    dishes: list[dict[str, Any]],
+    settings: dict[str, Any],
+    offers: dict[str, dict[str, Any]] | None = None,
+    fridge: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """The value of every :data:`PROMPT_VARIABLES` entry for one run.
 
     ``daysToPlan`` and ``suggestionsPerDay`` go in as plain numbers; the
-    priority order, the known-vs-unknown lean and the Inspiration text are
-    rendered as natural-language instructions, because models follow prose more
+    priority order, the known-vs-unknown lean and the Inspiration text also
+    come as natural-language instructions, because models follow prose more
     reliably than a raw settings blob (spec.md → "Prompt composition").
+
+    ``offers`` maps each short offer ref (``o1``…) to its offer — the run's
+    DiscountData, already food-filtered and ranked. ``fridge`` is what is in
+    the house (see :mod:`food_planer.fridge`).
     """
-    days = settings["daysToPlan"]
-    per_day = settings["suggestionsPerDay"]
+    offers = offers or {}
+    offer_list = _offers_block(offers)
     priority = settings.get("priority") or []
     inspiration = (settings.get("inspiration") or "").strip()
+    return {
+        "days": str(settings["daysToPlan"]),
+        "suggestions_per_day": str(settings["suggestionsPerDay"]),
+        "bias_instruction": _bias_sentence(settings.get("knownVsUnknownBias", 0.5)),
+        "priority_order": ", ".join(priority),
+        "priority_instruction": (
+            "When choosing dishes, prioritise them in this order: "
+            + ", ".join(priority)
+            + " — the earliest matters most."
+            if priority
+            else ""
+        ),
+        "inspiration": inspiration,
+        "inspiration_instruction": (
+            f"The household is curious to try: {inspiration}" if inspiration else ""
+        ),
+        "dish_library": _dish_block(dishes),
+        "offers": offer_list,
+        "offers_instruction": (
+            "These products are on offer this week at our shops. Prefer dishes "
+            "that make good use of them. Whenever a suggestion uses one, add it "
+            "to that suggestion's discounts: offerId is the offer's [id] (only "
+            "ids from this list), and matchedIngredient is the name of the "
+            "ingredient it covers, written exactly as in the suggestion's "
+            "ingredients.\n\n" + offer_list
+            if offers
+            else ""
+        ),
+        **fridge_prompt_values(fridge or {"items": []}),
+    }
 
-    priority_line = (
-        "When choosing dishes, prioritise them in this order: "
-        + ", ".join(priority)
-        + " — the earliest matters most."
-        if priority
-        else ""
-    )
-    inspiration_line = (
-        f"The household is curious to try: {inspiration}" if inspiration else ""
-    )
 
-    sections = [
-        "You are planning a household's week of dinners.",
-        f"Plan exactly {days} day(s), with {per_day} dinner suggestion(s) per day.",
-        "Return the whole week in one response so no dish repeats across days.",
-        "For each suggestion set sourceDish to the [id] of the library dish it "
-        "came from, or null when you invented a new dish.",
-        _bias_sentence(settings.get("knownVsUnknownBias", 0.5)),
-        priority_line,
-        inspiration_line,
-        "Our dish library:",
-        _dish_block(dishes),
-    ]
-    return "\n\n".join(section for section in sections if section)
+def _drop_empty_lines(template: str, values: dict[str, str]) -> str:
+    """Remove lines that hold nothing but a variable whose value is empty.
+
+    The blank line before such a line goes too, so an unset Inspiration leaves
+    no hole in the prompt — the same effect as skipping an empty section.
+    """
+    out: list[str] = []
+    for line in template.split("\n"):
+        match = _VARIABLE.fullmatch(line.strip())
+        if match and values.get(match.group(1)) == "":
+            if out and not out[-1].strip():
+                out.pop()
+            continue
+        out.append(line)
+    return "\n".join(out).strip()
+
+
+def render_prompt_segments(
+    template: str, values: dict[str, str]
+) -> list[dict[str, str | None]]:
+    """The rendered prompt as ``{text, variable}`` pieces, in order.
+
+    ``variable`` names the placeholder a piece was injected from, or is null for
+    the template's own text — which is how the editor's preview highlights the
+    injected values. A name with no value is left in place, braces and all.
+    """
+    cleaned = _drop_empty_lines(template, values)
+    segments: list[dict[str, str | None]] = []
+    pos = 0
+    for match in _VARIABLE.finditer(cleaned):
+        if match.start() > pos:
+            segments.append({"text": cleaned[pos : match.start()], "variable": None})
+        name = match.group(1)
+        if name in values:
+            segments.append({"text": values[name], "variable": name})
+        else:
+            segments.append({"text": match.group(0), "variable": None})
+        pos = match.end()
+    if pos < len(cleaned):
+        segments.append({"text": cleaned[pos:], "variable": None})
+    return segments
+
+
+def compose_planning_prompt(
+    dishes: list[dict[str, Any]],
+    settings: dict[str, Any],
+    template: str | None = None,
+    offers: dict[str, dict[str, Any]] | None = None,
+    fridge: dict[str, Any] | None = None,
+) -> str:
+    """Compose the single planning call from the library, the settings, the
+    run's offers and what is in the fridge.
+
+    ``template`` is the household's edited prompt; ``None`` uses the default.
+    """
+    values = prompt_values(dishes, settings, offers, fridge)
+    segments = render_prompt_segments(template or DEFAULT_PROMPT_TEMPLATE, values)
+    return "".join(seg["text"] for seg in segments)

@@ -34,13 +34,22 @@ _Avoid_: New dish, novel dish (older phrasing — "unknown" is now the canonical
 **Inspiration**:
 Freeform text on a PlanningSettings describing the kinds of unknown dishes the person is curious to try. Used to steer the LLM when a planning run favors unknown dishes over known ones.
 
-**FridgeContext**:
-Freeform text plus zero or more FridgeImages describing what's currently in the fridge, shared at the Household level. Stored and passed to the LLM as-is — never parsed into a structured ingredient list.
-_Avoid_: Pantry, inventory (implies structured, itemized stock, which this isn't)
+**Fridge** ("What is in the fridge?"):
+The Household's itemised stock, shared household-wide, in two kinds. Fed to the LLM on every PlanningRun as two named lists.
+_Avoid_: FridgeContext, FridgeImage (the earlier freeform-text-and-persistent-photos model, now replaced; photos are scanned once and never kept)
 
-**FridgeImage**:
-A photo attached to the FridgeContext. Persists until someone removes it, and is shown to the LLM directly on every PlanningRun rather than being turned into text first.
-_Avoid_: Attachment, upload, scan (name the act of adding one, not the thing); a transient image summarised once and discarded — an earlier model of this, now rejected
+**Fresh item**:
+Something in the house that keeps for less than about a month (milk, chicken, salad). Added by hand — picked from the common items, typed, or found by a photo scan — and removed by hand once used up. The planner is told to use these up first.
+
+**Pantry staple**:
+Something that keeps for a month or longer (rice, flour, spices). Assumed always in the house for now; the planner may use them freely.
+_Avoid_: Long-life item
+
+**Common items**:
+The pick-list per kind: a built-in basic set plus every name the Household has added before, minus what's already in the Fridge.
+
+**Fridge scan**:
+Photos sent once to the LLM, which returns named, classified items for the Household to review before any are added. The photos are not kept.
 
 **PlanningSettings**:
 Per-Profile configuration for a planning run: number of days to plan, suggestions per day (default 3/day), known-vs-unknown dish preference, priority order (cheap / quick & easy / delicious / healthy), preferred shops, and Inspiration text.

@@ -13,6 +13,8 @@ import {
   type ProfileSummary,
 } from "./api";
 import { DishEditor } from "./DishEditor";
+import { Fridge } from "./Fridge";
+import { Offers } from "./Offers";
 import { PlanWeek } from "./PlanWeek";
 import { SettingsScreen } from "./SettingsScreen";
 import { ShoppingList } from "./ShoppingList";
@@ -272,7 +274,7 @@ function DishLibrary() {
   );
 }
 
-type Screen = "plan" | "library" | "shopping" | "settings";
+type Screen = "plan" | "fridge" | "library" | "shopping" | "offers" | "settings";
 
 export function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -345,6 +347,13 @@ export function App() {
           Plan a week
         </button>
         <button
+          onClick={() => setScreen("fridge")}
+          aria-current={screen === "fridge"}
+          style={{ fontWeight: screen === "fridge" ? 700 : 400 }}
+        >
+          What is in the fridge?
+        </button>
+        <button
           onClick={() => setScreen("library")}
           aria-current={screen === "library"}
           style={{ fontWeight: screen === "library" ? 700 : 400 }}
@@ -359,6 +368,13 @@ export function App() {
           Shopping list
         </button>
         <button
+          onClick={() => setScreen("offers")}
+          aria-current={screen === "offers"}
+          style={{ fontWeight: screen === "offers" ? 700 : 400 }}
+        >
+          Tilbudsavis
+        </button>
+        <button
           onClick={() => setScreen("settings")}
           aria-current={screen === "settings"}
           style={{ fontWeight: screen === "settings" ? 700 : 400 }}
@@ -367,8 +383,10 @@ export function App() {
         </button>
       </nav>
       {screen === "plan" && <PlanWeek key={profile.id} profile={profile} />}
+      {screen === "fridge" && <Fridge />}
       {screen === "library" && <DishLibrary />}
       {screen === "shopping" && <ShoppingList />}
+      {screen === "offers" && <Offers key={profile.id} profile={profile} />}
       {screen === "settings" && (
         <SettingsScreen
           key={profile.id}

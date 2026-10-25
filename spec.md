@@ -233,9 +233,10 @@ Suggestion
   estimatedCost     float                            # DKK
   prepTimeMinutes   int
   sourceDish        str | null                       # Dish id; null means unknown dish
-  discounts: [{ productName, shop, price, originalPrice,
-                discountPercent, validUntil, matchedIngredient }]
+  discounts: [{ offerId, matchedIngredient }]          # offerId is a short per-run ref ("o12")
 ```
+
+*Amendment:* the model no longer writes offer details itself. Each offer in the prompt carries a short per-run `[id]`; the model cites it with the ingredient it covers, and the backend replaces each reference with the full offer (`offerId` = Tjek id, `productName`, `description`, `shop`, `price`, `originalPrice`, `discountPercent`, `unitSize`, `validFrom`, `validUntil`, `imageUrl`, `matchedIngredient`) before persisting — so prices can't be invented, a made-up id is dropped, and the stored run stays denormalized. Non-food filtering also uses the title of the tilbudsavis an offer was printed in (e.g. "Bilka Nonfood Uge 43"). A chain whose fetch fails is named on the run's `offersUnavailable` and the plan proceeds without it (#11's provisional default).
 
 `ingredients[].quantity` is deliberately *not* split into number + unit. `discounts` is a **denormalized array**, not a list of ids — this amends the original `discountIds` decision. Ids only pay off against a durable store; DiscountData is fetched per-run and expires within the week, while the archive keeps runs forever, so an id-based lookup would render an empty Details panel a month later. `matchedIngredient` is the ingredient **name string** (not an index — indices break when lists drift, and the name is what gets displayed) that the backend's fuzzy keyword pass tied the offer to, or `null` for an unmatched offer.
 
@@ -307,7 +308,9 @@ A `status: "failed"` run returns **200 carrying the PlanningRun body**, not a 5x
 
 *Shops* — `GET /api/shops` → `[{slug, name, hasIcon}]`, `GET /api/shops/{slug}/icon`. The chain list is backend-owned because the discount fetcher already maps preferred shops onto Tjek dealer ids, so the canonical slug↔chain mapping exists server-side either way; duplicating it in the frontend would create two lists that must agree. `hasIcon` lets the frontend choose the colored-initial fallback without a failed image request per pill. Slug rule: lowercase, spaces → hyphens, æ/ø/å stripped.
 
-**There is no `GET /api/discounts`.** Discount fetching, food-filtering and ranking stay entirely inside the planning pipeline; the denormalized `discounts` array on each Suggestion means the frontend never needs a lookup.
+**There is no `GET /api/discounts`.** Discount fetching, food-filtering and ranking stay entirely inside the planning pipeline; the denormalized `discounts` array on each Suggestion means the frontend never needs a lookup. *Amendment:* `GET /api/shops/{slug}/offers` → `{shop, dealer, offers: Offer[], fetchedAt}` now backs a read-only **Tilbudsavis** screen for browsing one chain's current offers (unfiltered, cached a day per chain). It is a browser, not a lookup — Suggestions still carry their discounts denormalized.
+
+*Prompt* — `GET /api/prompt`, `PUT /api/prompt` (`template: null` resets to the default), `POST /api/prompt/preview`. The planning prompt is one household-wide template, edited from the Settings screen, with backend-derived values injected wherever a `{{variable}}` appears; a template naming an unknown variable is refused with a 422. The default template reproduces the prose composition described under "LLM contract".
 
 ### Screen: Dish Library
 
@@ -444,7 +447,7 @@ The four prototype HTML files on the `prototype/*` branches are the prior art fo
 - **Structured or parsed fridge inventory.** FridgeContext stays freeform text and images fed to the model as-is; there is no item-level pantry with quantities to keep accurate.
 - **Multi-provider LLM support.** OpenAI is hardcoded; the only concession is that the model *name* is config rather than a literal.
 - **A database.** Plain JSON files, single worker, whole-file atomic rewrites.
-- **A `GET /api/discounts` endpoint or any frontend-visible discount browser.** Offers reach the UI only as the denormalized array on a Suggestion.
+- **A `GET /api/discounts` endpoint.** Offers reach the plan only as the denormalized array on a Suggestion. (A read-only per-chain Tilbudsavis browser was later added — see *Shops*.)
 - **API versioning and a custom error envelope.** Frontend and backend ship together.
 - **Native share-sheet export.** Requires HTTPS, which a plain-HTTP home-network install lacks.
 - **A dedicated per-site fetcher for `365discount.coop.dk`**, or LLM-driven browsing of either named discount site. One Tjek API client covers both and generalises to the rest.

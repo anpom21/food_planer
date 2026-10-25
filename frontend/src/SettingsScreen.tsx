@@ -7,6 +7,7 @@ import {
   type Profile,
   type Shop,
 } from "./api";
+import { PromptEditor } from "./PromptEditor";
 
 // Issue #19 — the per-Profile Settings screen. The settled behavioural
 // reference is the prototype's recommended variant (prototype/settings-screen,
@@ -122,6 +123,27 @@ function initials(name: string): string {
   return (letters.slice(0, 2) || name.slice(0, 2)).toUpperCase();
 }
 
+// A chain's logo, or its coloured-initial badge when there's no logo file.
+// Shared by the preferred-shops picker and the tilbudsavis screen.
+export function ShopMark({ shop }: { shop: Shop }) {
+  return shop.hasIcon ? (
+    <img
+      className="shop-logo"
+      src={shopIconUrl(shop.slug)}
+      alt=""
+      aria-hidden="true"
+    />
+  ) : (
+    <span
+      className="shop-badge"
+      aria-hidden="true"
+      style={{ background: badgeColour(shop.slug) }}
+    >
+      {initials(shop.name)}
+    </span>
+  );
+}
+
 // The preferred-shops picker (issue #32/#33/#34): a full-width card of pills
 // over the fixed Danish-chain list, each carrying its logo (or a coloured
 // initial when hasIcon is false — no failed image request), plus an "Other…"
@@ -210,22 +232,7 @@ function ShopPicker({
               aria-pressed={selected}
               onClick={() => toggleChain(shop.slug)}
             >
-              {shop.hasIcon ? (
-                <img
-                  className="shop-logo"
-                  src={shopIconUrl(shop.slug)}
-                  alt=""
-                  aria-hidden="true"
-                />
-              ) : (
-                <span
-                  className="shop-badge"
-                  aria-hidden="true"
-                  style={{ background: badgeColour(shop.slug) }}
-                >
-                  {initials(shop.name)}
-                </span>
-              )}
+              <ShopMark shop={shop} />
               {shop.name}
             </button>
           );
@@ -266,6 +273,7 @@ export function SettingsScreen({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [promptOpen, setPromptOpen] = useState(false);
 
   const patch = (fields: Partial<PlanningSettings>) => {
     setDraft((prev) => ({ ...prev, ...fields }));
@@ -380,6 +388,34 @@ export function SettingsScreen({
           onChange={(e) => patch({ inspiration: e.target.value })}
         />
       </section>
+
+      <section className="settings-card prompt-card">
+        <div>
+          <label>
+            Planner prompt{" "}
+            <span className="hint">— shared by the whole household</span>
+          </label>
+          <p className="muted">
+            The instructions sent to the model, with your settings filled in
+            wherever a <code className="var-token">{"{{variable}}"}</code>{" "}
+            appears.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => setPromptOpen(true)}
+        >
+          ⚙ Edit prompt…
+        </button>
+      </section>
+
+      {promptOpen && (
+        <PromptEditor
+          profileId={profile.id}
+          onClose={() => setPromptOpen(false)}
+        />
+      )}
 
       <div className="settings-actions">
         <button className="btn primary" type="submit" disabled={busy}>

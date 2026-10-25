@@ -68,6 +68,11 @@ def _add_dish(client: TestClient, title: str, **fields: Any) -> str:
 def test_plan_a_week_returns_a_full_week_synchronously(client, fake_openai) -> None:
     fake_openai.canned = _canned_week()
     profile_id = _make_profile(client)
+    # Ask for exactly what the canned week holds, so it's a full week.
+    client.put(
+        f"/api/profiles/{profile_id}/settings",
+        json={"daysToPlan": 2, "suggestionsPerDay": 2},
+    )
 
     resp = client.post("/api/planning-runs", json={"profileId": profile_id})
 
@@ -150,6 +155,27 @@ def test_truncation_retries_once_and_marks_partial(client, fake_openai) -> None:
     # The ask travels alongside the actuals so a short week can't read as full.
     assert run["requestedDays"] == 7
     assert run["requestedSuggestionsPerDay"] == 2
+
+
+def test_model_call_error_is_a_failed_run_not_a_500(
+    client, fake_openai, data_dir
+) -> None:
+    import json
+
+    fake_openai.behaviour = "error"
+    profile_id = _make_profile(client)
+
+    resp = client.post("/api/planning-runs", json={"profileId": profile_id})
+
+    assert resp.status_code == 200
+    run = resp.json()
+    assert run["status"] == "failed"
+    assert run["error"] == "TimeoutError: Request timed out."
+    assert fake_openai.calls == 1  # the client already retried; no second pass
+    # Persisted and traced, so a stalled call leaves evidence behind.
+    assert client.get(f"/api/planning-runs/{run['id']}").json()["error"]
+    trace = json.loads((data_dir / "run_logs" / f"{run['id']}.json").read_text("utf-8"))
+    assert trace["calls"][0]["error"] == "TimeoutError: Request timed out."
 
 
 def test_truncation_twice_is_a_failure(client, fake_openai) -> None:
@@ -259,6 +285,7 @@ def test_structured_output_schema_is_strict_and_model_is_config(monkeypatch) -> 
             assert_strict(obj["items"])
 
     assert_strict(schema)
+    assert "minItems" not in days  # unpinned without a run's numbers
     # sourceDish is optional-as-nullable-union, not an omission.
     assert suggestion["properties"]["sourceDish"]["type"] == ["string", "null"]
 
@@ -266,6 +293,73 @@ def test_structured_output_schema_is_strict_and_model_is_config(monkeypatch) -> 
     assert resolve_model() == "gpt-test-tiny"
     monkeypatch.delenv("FOOD_PLANNER_OPENAI_MODEL", raising=False)
     assert resolve_model()  # a non-empty default when unset
+
+
+def test_schema_pins_the_requested_day_and_suggestion_counts(
+    client, fake_openai
+) -> None:
+    fake_openai.canned = _canned_week()
+    profile_id = _make_profile(client)
+    client.put(
+        f"/api/profiles/{profile_id}/settings",
+        json={"daysToPlan": 5, "suggestionsPerDay": 3},
+    )
+
+    client.post("/api/planning-runs", json={"profileId": profile_id})
+
+    days = fake_openai.schemas[-1]["properties"]["days"]
+    assert days["minItems"] == days["maxItems"] == 5
+    suggestions = days["items"]["properties"]["suggestions"]
+    assert suggestions["minItems"] == suggestions["maxItems"] == 3
+
+
+def test_truncation_retry_schema_pins_the_halved_counts(client, fake_openai) -> None:
+    fake_openai.behaviour = "truncate_once"
+    fake_openai.canned = _canned_week()
+    profile_id = _make_profile(client)  # defaults: 7 days x 2
+
+    client.post("/api/planning-runs", json={"profileId": profile_id})
+
+    retry_days = fake_openai.schemas[-1]["properties"]["days"]
+    assert retry_days["minItems"] == retry_days["maxItems"] == 3
+    suggestions = retry_days["items"]["properties"]["suggestions"]
+    assert suggestions["minItems"] == suggestions["maxItems"] == 1
+
+
+def test_short_week_from_the_model_is_partial_not_success(
+    client, fake_openai
+) -> None:
+    fake_openai.canned = _canned_week()  # two days
+    profile_id = _make_profile(client)
+    client.put(
+        f"/api/profiles/{profile_id}/settings",
+        json={"daysToPlan": 5, "suggestionsPerDay": 2},
+    )
+
+    run = client.post(
+        "/api/planning-runs", json={"profileId": profile_id}
+    ).json()
+
+    assert run["status"] == "partial"
+    assert run["dayCount"] == 2
+    assert run["requestedDays"] == 5
+    assert run["requestedSuggestionsPerDay"] == 2
+    assert fake_openai.calls == 1  # flagged, not retried
+
+
+def test_too_few_suggestions_on_a_day_is_partial(client, fake_openai) -> None:
+    fake_openai.canned = _canned_week()  # two suggestions a day
+    profile_id = _make_profile(client)
+    client.put(
+        f"/api/profiles/{profile_id}/settings",
+        json={"daysToPlan": 2, "suggestionsPerDay": 3},
+    )
+
+    run = client.post(
+        "/api/planning-runs", json={"profileId": profile_id}
+    ).json()
+
+    assert run["status"] == "partial"
 
 
 # --- Past plans archive (issue #26) ---------------------------------------
