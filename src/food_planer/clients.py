@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -58,6 +59,10 @@ class OpenAIClient(Protocol):
         """One vision call: ``images`` are ``(mime type, bytes)`` pairs."""
         ...
 
+    async def review_matches(self, *, prompt: str, schema: dict[str, Any]) -> LLMResult:
+        """One small text call: confirm or reject uncertain offer matches."""
+        ...
+
 
 class TjekClient(Protocol):
     """The seam the discount pipeline talks to."""
@@ -100,6 +105,26 @@ class RealOpenAIClient:
                     "name": "weekly_plan",
                     "strict": True,
                     "schema": schema or planning_json_schema(),
+                }
+            },
+        )
+        return _structured_result(response)
+
+    async def review_matches(self, *, prompt: str, schema: dict[str, Any]) -> LLMResult:
+        from openai import AsyncOpenAI
+        from .planning import resolve_model
+
+        client = AsyncOpenAI(timeout=OPENAI_TIMEOUT_SECONDS, max_retries=1)
+        response = await client.responses.create(
+            model=resolve_model(),
+            input=prompt,
+            max_output_tokens=4000,
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "match_review",
+                    "strict": True,
+                    "schema": schema,
                 }
             },
         )
@@ -240,6 +265,9 @@ class FakeOpenAIClient:
     # What a fridge scan returns, and the images each scan was sent.
     scan_output: dict[str, Any] = field(default_factory=lambda: {"items": []})
     scans: list[list[tuple[str, bytes]]] = field(default_factory=list)
+    # What a match review returns; ``None`` approves every [m…] it was asked.
+    review_output: dict[str, Any] | None = None
+    reviews: list[str] = field(default_factory=list)
 
     async def create_plan(
         self,
@@ -275,6 +303,15 @@ class FakeOpenAIClient:
         if self.behaviour == "refuse":
             return LLMResult(status="refused")
         return LLMResult(status="completed", output=self.scan_output)
+
+    async def review_matches(self, *, prompt: str, schema: dict[str, Any]) -> LLMResult:
+        self.reviews.append(prompt)
+        if self.review_output is not None:
+            return LLMResult(status="completed", output=self.review_output)
+        ids = re.findall(r"\[(m\d+)\]", prompt)
+        return LLMResult(
+            status="completed", output={"verdicts": [{"id": i, "match": True} for i in ids]}
+        )
 
 
 @dataclass

@@ -1,0 +1,26 @@
+/* On-hand badges: what an ingredient list already has in the house. */
+.onhand {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+
+.onhand.fresh {
+  background: #eef6ea;
+  border-color: #cfe3c4;
+  color: #2f5a1f;
+}
+
+.onhand.staple {
+  background: #eef1f5;
+  border-color: #d5dce6;
+  color: #46566b;
+}

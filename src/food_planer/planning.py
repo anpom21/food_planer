@@ -16,6 +16,7 @@ from typing import Any
 
 from .discounts import offer_line
 from .fridge import fridge_prompt_values
+from .recipes.matching import RecipeMatch, recipe_prompt_line, recipe_refs
 
 # OpenAI's cheapest Structured-Outputs-capable model at time of writing. The
 # spec insists this be config, not a literal, so the spec doesn't go stale as
@@ -67,6 +68,15 @@ _SUGGESTION = {
         "prepTimeMinutes": {"type": "integer"},
         # null means an unknown dish the model invented; a string is a Dish id.
         "sourceDish": {"type": ["string", "null"]},
+        # The [r…] id of the imported recipe a suggestion is based on, or null.
+        # The backend swaps in the recipe's link, thumbnail and real times.
+        "sourceRecipe": {
+            "type": ["string", "null"],
+            "description": (
+                "The [r…] id of the recipe from the prompt's recipe list this "
+                "dish is based on, or null if it isn't based on one."
+            ),
+        },
         # References into this run's offers; denormalized by the backend.
         "discounts": {
             "type": "array",
@@ -85,6 +95,7 @@ _SUGGESTION = {
         "estimatedCost",
         "prepTimeMinutes",
         "sourceDish",
+        "sourceRecipe",
         "discounts",
     ],
 }
@@ -189,6 +200,8 @@ PROMPT_VARIABLES: dict[str, str] = {
     "fridge_fresh": "The fresh items in the fridge, comma-separated.",
     "pantry_staples": "The pantry staples always in the house, comma-separated.",
     "fridge_instruction": "The fridge's fresh items and pantry staples, as an instruction (empty when both are empty).",
+    "recipes": "Imported dinner recipes that use a fresh item or an offer, best match first, one per line with its [id].",
+    "recipes_instruction": "Those recipes, with how to use them (empty when none match).",
 }
 
 DEFAULT_PROMPT_TEMPLATE = """You are planning a household's week of dinners.
@@ -210,6 +223,8 @@ Write every ingredient name in Danish, the way Danish shops label it (e.g. "kyll
 {{fridge_instruction}}
 
 {{offers_instruction}}
+
+{{recipes_instruction}}
 
 Our dish library:
 
@@ -237,6 +252,7 @@ def prompt_values(
     settings: dict[str, Any],
     offers: dict[str, dict[str, Any]] | None = None,
     fridge: dict[str, Any] | None = None,
+    recipes: list[RecipeMatch] | None = None,
 ) -> dict[str, str]:
     """The value of every :data:`PROMPT_VARIABLES` entry for one run.
 
@@ -247,9 +263,16 @@ def prompt_values(
 
     ``offers`` maps each short offer ref (``o1``…) to its offer — the run's
     DiscountData, already food-filtered and ranked. ``fridge`` is what is in
-    the house (see :mod:`food_planer.fridge`).
+    the house (see :mod:`food_planer.fridge`). ``recipes`` are the imported
+    recipes that use some of either, already ranked and capped (see
+    :mod:`food_planer.recipes.matching`).
     """
     offers = offers or {}
+    offer_ids = {offer["id"]: ref for ref, offer in offers.items()}
+    recipe_list = "\n".join(
+        recipe_prompt_line(ref, match, offer_ids)
+        for ref, match in recipe_refs(recipes or []).items()
+    )
     offer_list = _offers_block(offers)
     priority = settings.get("priority") or []
     inspiration = (settings.get("inspiration") or "").strip()
@@ -282,6 +305,18 @@ def prompt_values(
             else ""
         ),
         **fridge_prompt_values(fridge or {"items": []}),
+        "recipes": recipe_list,
+        "recipes_instruction": (
+            "These recipes from our recipe collection use fresh items we have "
+            "at home or products on offer this week. Base dishes on them where "
+            "they fit; when you do, set the suggestion's sourceRecipe to the "
+            "recipe's [id] and use the recipe's title. \"check offer\" marks a "
+            "product that may not be the ingredient it was matched to: judge "
+            "from the product name, and only count it as on offer (or cite "
+            "it) when it really is that ingredient.\n\n" + recipe_list
+            if recipe_list
+            else ""
+        ),
     }
 
 
@@ -334,12 +369,13 @@ def compose_planning_prompt(
     template: str | None = None,
     offers: dict[str, dict[str, Any]] | None = None,
     fridge: dict[str, Any] | None = None,
+    recipes: list[RecipeMatch] | None = None,
 ) -> str:
     """Compose the single planning call from the library, the settings, the
-    run's offers and what is in the fridge.
+    run's offers, what is in the fridge and the recipes that use them.
 
     ``template`` is the household's edited prompt; ``None`` uses the default.
     """
-    values = prompt_values(dishes, settings, offers, fridge)
+    values = prompt_values(dishes, settings, offers, fridge, recipes)
     segments = render_prompt_segments(template or DEFAULT_PROMPT_TEMPLATE, values)
     return "".join(seg["text"] for seg in segments)

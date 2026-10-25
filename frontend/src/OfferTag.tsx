@@ -52,6 +52,9 @@ export function OfferCard({ offer }: { offer: Discount }) {
             <span className="chip discount">−{Math.round(offer.discountPercent)}%</span>
           )}
         </span>
+        {offer.matchedBy === "review" && (
+          <span className="muted">✓ Checked: an uncertain name match the model confirmed</span>
+        )}
         {offer.validUntil && (
           <span className="muted">
             {offer.validFrom ? `${shortDate(offer.validFrom)} – ` : "until "}

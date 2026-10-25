@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { BiasSlider, Stepper } from "./SettingsScreen";
 import { OfferCard, OfferTag, offerFor } from "./OfferTag";
+import { OnHandBadge } from "./OnHand";
+import { RecipeButton, RecipeFacts, RecipeThumb } from "./RecipeLink";
 import {
   addShoppingItems,
   getPlanningRun,
@@ -165,6 +167,7 @@ function SuggestionCard({
           ✓
         </span>
       )}
+      {suggestion.recipe && <RecipeThumb recipe={suggestion.recipe} />}
       <h3 className="sugg-title">{suggestion.title}</h3>
       <p className="sugg-desc">{suggestion.description}</p>
       <div className="sugg-chips">
@@ -175,7 +178,19 @@ function SuggestionCard({
         ) : (
           <span className="chip unknown">✨ New to you</span>
         )}
-        <span className="chip">⏱ {suggestion.prepTimeMinutes} min</span>
+        <span
+          className="chip"
+          title={
+            suggestion.recipe?.workTime
+              ? `Arbejdstid ${suggestion.recipe.workTime}`
+              : undefined
+          }
+        >
+          ⏱ {suggestion.recipe?.totalTime ?? `${suggestion.prepTimeMinutes} min`}
+        </span>
+        {suggestion.recipe?.servings && (
+          <span className="chip">👥 {suggestion.recipe.servings}</span>
+        )}
         <span className="chip">~{suggestion.estimatedCost} kr</span>
         {suggestion.discounts.length > 0 && (
           <span className="chip discount">
@@ -183,15 +198,18 @@ function SuggestionCard({
           </span>
         )}
       </div>
-      <button
-        className="btn ghost sugg-details"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDetails();
-        }}
-      >
-        Details
-      </button>
+      <div className="sugg-actions">
+        <button
+          className="btn ghost sugg-details"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDetails();
+          }}
+        >
+          Details
+        </button>
+        {suggestion.recipe && <RecipeButton recipe={suggestion.recipe} />}
+      </div>
     </article>
   );
 }
@@ -220,6 +238,12 @@ function DetailsModal({
           {known ? `⭐ From your library: ${known.title}` : "✨ New to you"} · ⏱{" "}
           {suggestion.prepTimeMinutes} min · ~{suggestion.estimatedCost} kr
         </p>
+        {suggestion.recipe && (
+          <>
+            <RecipeThumb recipe={suggestion.recipe} />
+            <RecipeFacts recipe={suggestion.recipe} />
+          </>
+        )}
         <p>{suggestion.description}</p>
         <h3>Ingredients</h3>
         <ul className="ing-list">
@@ -228,6 +252,7 @@ function DetailsModal({
             return (
               <li key={i}>
                 <span className="ing-q">{ing.quantity}</span> {ing.name}
+                <OnHandBadge have={ing.have} />
                 {offer && <OfferTag offer={offer} />}
               </li>
             );
@@ -244,6 +269,7 @@ function DetailsModal({
           </>
         )}
         <div className="modal-actions">
+          {suggestion.recipe && <RecipeButton recipe={suggestion.recipe} />}
           <button className="btn primary" onClick={onClose}>
             Close
           </button>
@@ -306,12 +332,14 @@ function IngredientReview({
   onCancel: () => void;
   onConfirm: (items: ShoppingItemInput[]) => void;
 }) {
-  // "<cardKey>::<ingredient>" → ticked. Built once, all on, when the review opens.
+  // "<cardKey>::<ingredient>" → ticked. Built once when the review opens:
+  // everything on except pantry staples, which are always in the house.
+  // Fresh items stay ticked but marked — there may not be enough left.
   const [ticked, setTicked] = useState<Record<string, boolean>>(() => {
     const seed: Record<string, boolean> = {};
     for (const s of selected)
       for (const ing of s.suggestion.ingredients)
-        seed[ingKey(s.key, ing.name)] = true;
+        seed[ingKey(s.key, ing.name)] = ing.have !== "staple";
     return seed;
   });
 
@@ -354,8 +382,9 @@ function IngredientReview({
         <h2>Add ingredients</h2>
         <p className="review-sub">
           {selected.length} {selected.length === 1 ? "dish" : "dishes"} · {total}{" "}
-          ingredients, grouped by dish. Everything starts ticked — untick
-          whatever you already have.
+          ingredients, grouped by dish. Everything starts ticked except
+          pantry staples (🫙) — untick whatever else you already have, like
+          what's in the fridge (🥬).
           {tints.size > 0 && (
             <>
               <br />
@@ -400,6 +429,7 @@ function IngredientReview({
                     />
                     <span className="ing-row-q">{ing.quantity}</span>
                     <span className="ing-row-nm">{ing.name}</span>
+                    <OnHandBadge have={ing.have} />
                     {(() => {
                       const offer = offerFor(ing, s.suggestion.discounts);
                       return offer && <OfferTag offer={offer} />;

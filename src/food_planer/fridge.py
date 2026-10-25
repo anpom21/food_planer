@@ -11,6 +11,7 @@ Everything here is pure; the endpoints in :mod:`food_planer.app` wrap it.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable
 
 KINDS = ("fresh", "staple")
@@ -142,6 +143,120 @@ def fridge_body(fridge: dict[str, Any]) -> dict[str, Any]:
         "staples": [i for i in fridge["items"] if i["kind"] == "staple"],
         "common": common_items(fridge),
     }
+
+
+# --- Is an ingredient something we have? -----------------------------------
+# Recipes and Suggestions name ingredients in Danish, while the Fridge's
+# built-in pick-list is English, so each item is expanded to the words a
+# Danish recipe uses for it. A name with no entry is matched as typed.
+
+# Danish words a recipe uses for each of the Fridge's built-in items, fresh
+# and staple alike (see :data:`BASIC_ITEMS`).
+ITEM_TERMS: dict[str, tuple[str, ...]] = {
+    # fresh
+    "milk": ("mælk", "sødmælk", "letmælk", "minimælk", "skummetmælk"),
+    "butter": ("smør",),
+    "eggs": ("æg", "æggeblomme", "æggehvide"),
+    "yoghurt": ("yoghurt", "skyr"),
+    "cheese": (
+        "ost", "parmesan", "mozzarella", "feta", "cheddar", "burrata",
+        "ricotta", "halloumi", "gruyère", "pecorino",
+    ),
+    "cream": ("fløde", "piskefløde", "madlavningsfløde", "cremefraiche", "creme fraiche"),
+    "chicken": ("kylling",),
+    "minced beef": ("hakket oksekød", "oksefars", "hakket kød"),
+    "minced pork": ("hakket svinekød", "svinefars", "hakket grisekød"),
+    "bacon": ("bacon",),
+    "ham": ("skinke",),
+    "fish": ("fisk", "laks", "torsk", "rødspætte", "kulmule", "sej", "tun", "rejer", "makrel"),
+    "tomatoes": ("tomat", "cherrytomat", "cocktailtomat", "bøftomat"),
+    "cucumber": ("agurk",),
+    "lettuce": ("salat", "hjertesalat", "rucola", "romainesalat", "iceberg"),
+    "bell pepper": ("peberfrugt",),
+    "carrots": ("gulerod", "gulerødder"),
+    "broccoli": ("broccoli",),
+    "spinach": ("spinat",),
+    "mushrooms": ("champignon", "svampe", "svamp", "østershatte", "shiitake"),
+    "leek": ("porre", "porrer"),
+    "spring onions": ("forårsløg",),
+    "fresh herbs": ("persille", "basilikum", "koriander", "dild", "purløg", "mynte", "estragon"),
+    "lemon": ("citron",),
+    "apples": ("æble", "æbler"),
+    "bananas": ("banan",),
+    "bread": ("brød", "rugbrød", "flutes", "baguette", "sandwichbrød"),
+    # staple
+    "salt": ("salt", "flagesalt", "havsalt"),
+    "black pepper": ("peber",),
+    "olive oil": ("olivenolie",),
+    "vegetable oil": ("olie", "rapsolie", "solsikkeolie", "neutral olie"),
+    "flour": ("mel", "hvedemel"),
+    "sugar": ("sukker", "farin", "flormelis", "rørsukker"),
+    "rice": ("ris", "jasminris", "basmatiris", "risottoris"),
+    "pasta": ("pasta", "spaghetti", "penne", "tagliatelle", "fusilli", "lasagneplader"),
+    "oats": ("havregryn",),
+    "canned tomatoes": ("hakkede tomater", "flåede tomater", "tomatpuré"),
+    "stock cubes": ("bouillon", "bouillonterning", "grøntsagsbouillon", "hønsebouillon", "oksebouillon", "fond"),
+    "soy sauce": ("soja", "sojasauce"),
+    "vinegar": ("eddike", "balsamico"),
+    "mustard": ("sennep",),
+    "ketchup": ("ketchup",),
+    "dried herbs": ("oregano", "timian", "rosmarin", "laurbærblad"),
+    "spices": ("spidskommen", "paprika", "karry", "kanel", "chili", "chiliflager", "gurkemeje", "muskatnød", "koriander stødt"),
+    "onions": ("løg", "rødløg", "skalotteløg"),
+    "garlic": ("hvidløg",),
+    "potatoes": ("kartofler", "kartoffel"),
+    "honey": ("honning",),
+    "baking powder": ("bagepulver",),
+}
+
+
+
+def item_terms(name: str) -> tuple[str, ...]:
+    """The Danish words a recipe would use for a Fridge item."""
+    key = name.strip().lower()
+    return ITEM_TERMS.get(key, (key,))
+
+
+def _term_pattern(term: str) -> re.Pattern[str]:
+    """Every word of ``term`` must appear, starting or ending a word:
+    "kylling" finds "kyllingebryst", "ost" finds "flødeost"."""
+    return re.compile(
+        "".join(
+            rf"(?=.*(?:\b{re.escape(w)}|{re.escape(w)}(?:e|r|n|er|ne|erne|ene)?\b))"
+            for w in term.split()
+        )
+    )
+
+
+class OnHand:
+    """Answers "do we have this?" for an ingredient name, by Fridge item."""
+
+    def __init__(self, fresh: Iterable[str] = (), staples: Iterable[str] = ()) -> None:
+        self._fresh = {n: [_term_pattern(t) for t in item_terms(n)] for n in fresh}
+        self._staples = [_term_pattern(t) for n in staples for t in item_terms(n)]
+
+    @classmethod
+    def from_fridge(cls, fridge: dict[str, Any]) -> OnHand:
+        items = fridge.get("items", [])
+        return cls(
+            [i["name"] for i in items if i["kind"] == "fresh"],
+            [i["name"] for i in items if i["kind"] == "staple"],
+        )
+
+    def fresh_items(self, name: str) -> list[str]:
+        """The fresh Fridge items an ingredient name is ("kyllingebryst" → ["Chicken"])."""
+        name = name.lower()
+        return [item for item, pats in self._fresh.items() if any(p.search(name) for p in pats)]
+
+    def is_staple(self, name: str) -> bool:
+        name = name.lower()
+        return any(p.search(name) for p in self._staples)
+
+    def kind(self, name: str) -> str | None:
+        """``"fresh"`` or ``"staple"`` when we have it at home, else ``None``."""
+        if self.fresh_items(name):
+            return "fresh"
+        return "staple" if self.is_staple(name) else None
 
 
 # --- The photo scan --------------------------------------------------------

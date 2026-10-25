@@ -1,0 +1,185 @@
+/* Recipes screen ------------------------------------------------------------ */
+.recipe-search {
+  min-width: 280px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 14px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.recipe-count {
+  margin: -12px 0 12px;
+  font-size: 13px;
+}
+
+.recipe-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.recipe-thumb {
+  display: block;
+  aspect-ratio: 19 / 12;
+  background: var(--line);
+}
+
+.recipe-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: opacity 0.15s;
+}
+
+.recipe-thumb:hover img {
+  opacity: 0.88;
+}
+
+.recipe-thumb-empty {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.recipe-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: 14px 16px 16px;
+}
+
+.recipe-meta {
+  margin: -4px 0 10px;
+  font-size: 12.5px;
+}
+
+.recipe-ingredients {
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+.recipe-ingredients summary {
+  cursor: pointer;
+  color: var(--ink-soft);
+}
+
+.recipe-ingredients h3 {
+  margin: 10px 0 2px;
+  font-size: 12.5px;
+}
+
+.recipe-ingredients ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  line-height: 1.5;
+}
+
+.recipe-link {
+  margin-top: auto;
+  align-self: flex-start;
+  text-decoration: none;
+}
+
+.recipe-more {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0 0;
+}
+
+@media (max-width: 820px) {
+  .recipes .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 540px) {
+  .recipes .toolbar {
+    flex-direction: column;
+  }
+  .recipe-search {
+    min-width: 0;
+    width: 100%;
+  }
+  .recipes .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* "Til ugens madplan": why each recipe is relevant this week */
+.recipe-tabs {
+  display: flex;
+  gap: 6px;
+  margin: -8px 0 18px;
+}
+
+.recipe-tabs button {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.recipe-tabs button.on {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+.recipe-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 10px;
+}
+
+.recipe-chips .chip {
+  font-size: 11.5px;
+  line-height: 1.4;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.recipe-chips .chip.prompt {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.recipe-chips .chip.fresh {
+  background: #eef6ea;
+  border-color: #cfe3c4;
+  color: #2f5a1f;
+}
+
+.recipe-chips .chip.offer {
+  background: #fdf1e3;
+  border-color: #f0d6b4;
+  color: #7a4710;
+}
+
+.recipe-chips .chip.offer.review {
+  background: transparent;
+  border-style: dashed;
+}
+
+.recipe-ingredients li .onhand {
+  margin-left: 4px;
+}

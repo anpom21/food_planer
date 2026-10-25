@@ -1,0 +1,48 @@
+/* A Suggestion's link back to its recipe. */
+.recipe-link-thumb {
+  display: block;
+  margin: -12px -12px 10px;
+  aspect-ratio: 19 / 10;
+  overflow: hidden;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--line);
+}
+
+.recipe-link-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: opacity 0.15s;
+}
+
+.recipe-link-thumb:hover img {
+  opacity: 0.88;
+}
+
+/* In the details modal the thumbnail sits inline rather than bleeding out. */
+.modal .recipe-link-thumb {
+  margin: 0 0 12px;
+  border-radius: 8px;
+  max-height: 220px;
+}
+
+.recipe-link-facts {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.recipe-link-btn {
+  text-decoration: none;
+  text-align: center;
+}
+
+.sugg-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sugg-actions > * {
+  flex: 1;
+}
