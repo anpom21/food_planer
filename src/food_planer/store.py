@@ -29,7 +29,8 @@ def new_id() -> str:
 # One entry per entity type. Collections default to ``[]``; singletons to their
 # empty object. This is the whole on-disk schema of the app.
 ENTITY_DEFAULTS: dict[str, Any] = {
-    "profiles": [],
+    # The household's planning settings (one set, no profiles).
+    "settings": {},
     "dishes": [],
     "planning_runs": [],
     "fridge_context": {"text": "", "images": []},
@@ -68,6 +69,12 @@ class JsonFile:
         """
         if not self.path.exists():
             self._atomic_write(self._cache)
+
+    def seed(self, data: Any) -> None:
+        """Replace the contents synchronously, for startup migrations that run
+        before any request (so the lock isn't needed). Atomic like ``update``."""
+        self._atomic_write(data)
+        self._cache = copy.deepcopy(data)
 
     def read(self) -> Any:
         """Return a deep copy of the cached contents.

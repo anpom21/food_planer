@@ -19,13 +19,6 @@ def _names(items):
     return [i["name"] for i in items]
 
 
-def _profile(client) -> str:
-    resp = client.post(
-        "/api/profiles/identify", json={"email": "a@example.com", "name": "A"}
-    )
-    return resp.json()["id"]
-
-
 def test_an_empty_fridge_offers_the_basic_common_items(client) -> None:
     body = client.get("/api/fridge").json()
     assert body["fresh"] == [] and body["staples"] == []
@@ -125,12 +118,11 @@ def test_a_failed_scan_is_a_502(client, fake_openai) -> None:
 
 
 def test_the_planning_prompt_names_fresh_items_and_staples(client, fake_openai) -> None:
-    profile_id = _profile(client)
     _add(
         client,
         [{"name": "Chicken", "kind": "fresh"}, {"name": "Rice", "kind": "staple"}],
     )
-    client.post("/api/planning-runs", json={"profileId": profile_id})
+    client.post("/api/planning-runs", json={})
     prompt = fake_openai.prompts[-1]
     assert "fresh items at home" in prompt and "Chicken" in prompt
     assert "always in the house" in prompt and "Rice" in prompt
@@ -140,7 +132,7 @@ def test_the_planning_prompt_names_fresh_items_and_staples(client, fake_openai) 
 
 
 def test_an_empty_fridge_leaves_no_trace_in_the_prompt(client, fake_openai) -> None:
-    client.post("/api/planning-runs", json={"profileId": _profile(client)})
+    client.post("/api/planning-runs", json={})
     assert "at home" not in fake_openai.prompts[-1]
 
 

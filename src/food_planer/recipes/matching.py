@@ -308,8 +308,8 @@ def recipe_card(
 ) -> dict[str, Any]:
     """A recipe shaped like a Suggestion card: parsed, marked ingredients, the
     offers it uses (denormalized like a Suggestion's discounts, each tied to
-    its ingredient's item name), how many ingredients are in the fridge, the
-    pantry or on offer, and a rough price."""
+    its ingredient's item name — 1:1 matches only), how many ingredients are in
+    the fridge, the pantry or on offer, and a rough price."""
     from ..discounts import denormalize_discount
 
     items = recipe_items(recipe, on_hand)
@@ -319,13 +319,12 @@ def recipe_card(
         if item["have"]:
             continue
         found = by_core.pop(ingredient_name(item["text"]), None)
-        if found is None:
+        # Only 1:1 matches: a card has no model to review a guess ("K-Salat
+        # bearnaisesauce" for lettuce), and its offers travel on to the
+        # shopping list. The planner still sees the guesses, marked to check.
+        if found is None or found["review"]:
             continue
-        offer = found["offer"]
-        discount = denormalize_discount(
-            offer, item["name"], "review" if found["review"] else "name"
-        )
-        discount["review"] = found["review"]
+        discount = denormalize_discount(found["offer"], item["name"], "name")
         discounts.append(discount)
     return {
         **{k: recipe.get(k) for k in ("source", "url", "title", "thumbnail", "servings", "total_time", "categories")},

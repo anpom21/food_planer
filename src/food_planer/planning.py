@@ -247,7 +247,7 @@ def _offers_block(offers: dict[str, dict[str, Any]]) -> str:
     return "\n".join(offer_line(ref, offer) for ref, offer in offers.items())
 
 
-# How the planner uses the imported recipes, per the Profile's recipeMode:
+# How the planner uses the imported recipes, per the household's recipeMode:
 # "only" every dish is one, "mix" about half, "none" never (no list at all).
 _RECIPE_SHARE = {
     "only": (

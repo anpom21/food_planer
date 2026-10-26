@@ -64,6 +64,30 @@ def icon_path(icons_dir: Path, slug: str) -> Path | None:
     return None
 
 
+# Media types a fetched logo may have, and the extension it's saved under.
+_ICON_TYPES = {
+    "image/svg+xml": "svg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/jpeg": "jpg",
+}
+
+
+def save_icon(icons_dir: Path, slug: str, data: bytes, media_type: str) -> Path | None:
+    """Store a fetched logo as ``data/icons/<slug>.<ext>``; ``None`` (nothing
+    written) for a malformed slug, an empty body or a media type that isn't
+    an image we serve."""
+    ext = _ICON_TYPES.get(media_type.split(";")[0].strip().lower())
+    if not ext or not data or not _SAFE_SLUG.fullmatch(slug):
+        return None
+    icons_dir.mkdir(parents=True, exist_ok=True)
+    path = icons_dir / f"{slug}.{ext}"
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_bytes(data)
+    tmp.replace(path)
+    return path
+
+
 def shop_catalog(icons_dir: Path) -> list[dict]:
     """The catalog rows: ``{slug, name, hasIcon}`` for every known chain.
 

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { foodEmoji } from "./foodEmoji";
+import { useHousehold } from "./household";
 import {
   addFridgeItems,
   getFridge,
@@ -53,77 +55,10 @@ function age(addedAt: string): string {
   return `${days} days`;
 }
 
-// An emoji per item, matched on a keyword in its name (Danish or English),
-// first match wins — so "Sweet potatoes" hits 🍠 before "potato" hits 🥔.
-// Anything unmatched falls back to its kind's emoji.
-const EMOJI: [string[], string][] = [
-  [["canned", "tinned", "dåse", "beans", "bønner", "chickpea"], "🥫"],
-  [["black pepper", "sort peber", "salt"], "🧂"],
-  [["milk", "mælk"], "🥛"],
-  [["butter", "smør"], "🧈"],
-  [["egg", "æg"], "🥚"],
-  [["yoghurt", "yogurt", "skyr"], "🥣"],
-  [["cheese", "cheddar", "ost", "parmesan", "mozzarella", "feta"], "🧀"],
-  [["cream", "fløde"], "🍶"],
-  [["chicken", "kylling"], "🍗"],
-  [["bacon"], "🥓"],
-  [["ham", "skinke", "pålæg"], "🍖"],
-  [["beef", "pork", "okse", "svin", "steak", "meat", "kød", "minced", "hakket"], "🥩"],
-  [["salmon", "laks", "fish", "fisk", "tuna", "tun", "cod", "torsk"], "🐟"],
-  [["shrimp", "prawn", "rejer"], "🦐"],
-  [["sweet potato", "sød kartoffel"], "🍠"],
-  [["potato", "kartof"], "🥔"],
-  [["tomato", "tomat"], "🍅"],
-  [["cucumber", "agurk"], "🥒"],
-  [["lettuce", "salad", "salat", "spinach", "spinat", "cabbage", "kål"], "🥬"],
-  [["pepper", "peber", "chili"], "🫑"],
-  [["carrot", "gulerod", "gulerød"], "🥕"],
-  [["broccoli"], "🥦"],
-  [["mushroom", "svamp", "champignon"], "🍄"],
-  [["leek", "porre", "spring onion", "forårsløg"], "🧅"],
-  [["garlic", "hvidløg"], "🧄"],
-  [["onion", "løg"], "🧅"],
-  [["corn", "majs"], "🌽"],
-  [["avocado"], "🥑"],
-  [["herb", "basil", "persille", "parsley", "dild", "urter"], "🌿"],
-  [["lemon", "lime", "citron"], "🍋"],
-  [["apple", "æble"], "🍎"],
-  [["banana", "banan"], "🍌"],
-  [["berr", "bær", "strawberr", "jordbær"], "🍓"],
-  [["orange", "appelsin"], "🍊"],
-  [["grape", "vindrue"], "🍇"],
-  [["bread", "brød", "rugbrød", "toast"], "🍞"],
-  [["leftover", "rester"], "🍲"],
-  [["juice"], "🧃"],
-  [["oil", "olie"], "🫒"],
-  [["flour", "mel"], "🌾"],
-  [["sugar", "sukker", "honey", "honning"], "🍯"],
-  [["rice", "ris"], "🍚"],
-  [["pasta", "spaghetti", "noodle", "nudler"], "🍝"],
-  [["oat", "havre", "cereal", "müsli"], "🥣"],
-  [["stock", "bouillon", "fond"], "🍲"],
-  [["soy", "soja", "vinegar", "eddike", "sauce", "sovs", "ketchup", "mustard", "sennep"], "🍶"],
-  [["spice", "krydder", "cumin", "paprika", "curry", "cinnamon", "kanel"], "🌶️"],
-  [["baking", "bagepulver", "yeast", "gær"], "🧁"],
-  [["coffee", "kaffe"], "☕"],
-  [["tea", "te"], "🍵"],
-  [["nut", "nød", "mandel", "almond"], "🥜"],
-  [["chocolate", "chokolade"], "🍫"],
-];
-
 const KIND_EMOJI: Record<FridgeKind, string> = { fresh: "🥬", staple: "🫙" };
 
 function emojiFor(name: string, kind: FridgeKind): string {
-  const lower = name.toLowerCase();
-  // Short keywords ("te", "ris", "egg") only match the start of a word, so
-  // "Eggs" is an egg but "Tomatoes" isn't tea.
-  const words = lower.split(/[^\p{L}]+/u);
-  for (const [keys, emoji] of EMOJI) {
-    if (keys.some((k) => (k.length <= 3 ? words.some((w) => w.startsWith(k)) : lower.includes(k)))) {
-      return emoji;
-    }
-  }
-  return KIND_EMOJI[kind];
+  return foodEmoji(name) ?? KIND_EMOJI[kind];
 }
 
 // A fresh item this old has probably gone off or been eaten — worth a look.
@@ -375,6 +310,7 @@ function PhotoTray({
 }
 
 export function Fridge() {
+  const { go, refreshCounts } = useHousehold();
   const [fridge, setFridge] = useState<FridgeData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -391,6 +327,7 @@ export function Fridge() {
     try {
       setError(null);
       setFridge(await op());
+      refreshCounts();
     } catch (e: unknown) {
       setError(String(e));
     }
@@ -444,11 +381,11 @@ export function Fridge() {
   const clear = (kind: FridgeKind) => act(() => clearFridge(kind));
 
   return (
-    <section className="library fridge">
-      <header className="toolbar">
+    <section className="page fridge">
+      <header className="page-head">
         <div>
           <h1>What is in the fridge?</h1>
-          <p className="muted">Shared by the whole household. The planner uses up what's here first.</p>
+          <p className="muted">The planner uses up what's here first.</p>
         </div>
         <label
           className={`btn${photos.length ? "" : " primary"}${
@@ -507,6 +444,20 @@ export function Fridge() {
           onClear={clear}
         />
       </div>
+
+      {fridge.fresh.length > 0 && (
+        <div className="next-steps">
+          <span className="muted">
+            {fridge.fresh.length} fresh {fridge.fresh.length === 1 ? "item" : "items"} to use up
+          </span>
+          <button className="btn" onClick={() => go("dishes")}>
+            Dishes that use them
+          </button>
+          <button className="btn primary" onClick={() => go("plan")}>
+            Plan a week
+          </button>
+        </div>
+      )}
 
       {found !== null && (
         <ScanReview

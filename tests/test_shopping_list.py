@@ -188,34 +188,42 @@ def test_text_export_shows_total_with_per_dish_shares_in_brackets(client) -> Non
     assert "Minced beef — 500 g (" not in text
 
 
-def test_csv_export_has_exactly_the_three_columns_and_provenance_notes(client) -> None:
+def test_csv_export_has_its_columns_provenance_notes_and_offers(client) -> None:
     _add(
         client,
         [
             {"name": "Potatoes", "quantity": "800 g", "source": {"suggestionTitle": "Frikadeller", "kind": "known"}},
             {"name": "Potatoes", "quantity": "400 g", "source": {"suggestionTitle": "Miso-glazed salmon", "kind": "unknown"}},
-            {"name": "Minced beef", "quantity": "500 g", "source": {"suggestionTitle": "Chili con carne", "kind": "known"}},
+            {"name": "Minced beef", "quantity": "500 g", "source": {"suggestionTitle": "Chili con carne", "kind": "known"},
+             "offer": {"shop": "Netto", "shopSlug": "netto", "productName": "Hakket oksekød 8-12%", "price": 35}},
         ],
     )
     body = client.get("/api/shopping-list/export.csv").text
     rows = list(csv.reader(io.StringIO(body.lstrip("﻿"))))
-    assert rows[0] == ["Ingredient", "Quantity", "Notes"]
+    assert rows[0] == ["Ingredient", "Quantity", "Notes", "Shop", "Offer"]
     parsed = {r[0]: r for r in rows[1:]}
     # Shared: one note per dish joined with "; ", each carrying that dish's share.
     assert parsed["Potatoes"] == [
         "Potatoes",
         "1200 g",
         "Frikadeller 800; Miso-glazed salmon 400",
+        "",
+        "",
     ]
-    # Single dish: the note is just the dish name, since Quantity already holds it.
-    assert parsed["Minced beef"] == ["Minced beef", "500 g", "Chili con carne"]
+    # Single dish: the note is just the dish name, since Quantity already holds
+    # it; the offer it was on keeps its shop.
+    assert parsed["Minced beef"] == [
+        "Minced beef", "500 g", "Chili con carne", "Netto", "Hakket oksekød 8-12% (35 kr)",
+    ]
+    # Grouped by shop: the offer comes first.
+    assert [r[0] for r in rows[1:]] == ["Minced beef", "Potatoes"]
 
 
 def test_csv_export_hand_added_item_carries_its_own_note(client) -> None:
     _add(client, [{"name": "Coffee", "quantity": "500 g", "source": None, "note": "we're just out"}])
     body = client.get("/api/shopping-list/export.csv").text
     rows = {r[0]: r for r in csv.reader(io.StringIO(body.lstrip("﻿")))}
-    assert rows["Coffee"] == ["Coffee", "500 g", "we're just out"]
+    assert rows["Coffee"] == ["Coffee", "500 g", "we're just out", "", ""]
 
 
 def test_csv_export_quotes_fields_containing_commas_or_quotes(client) -> None:
@@ -243,3 +251,105 @@ def test_csv_export_starts_with_bom_and_preserves_danish_characters(client) -> N
     assert "øko hvis muligt" in body
     # Downloaded, not rendered inline.
     assert "shopping-list.csv" in resp.headers.get("content-disposition", "")
+
+
+# --- Export to the iPhone's Påmindelser, via an iOS Shortcut ------------------
+
+
+def test_reminders_export_has_a_title_and_a_subtext_per_row(client) -> None:
+    _add(
+        client,
+        [
+            {"name": "hakket oksekød", "quantity": "500 g",
+             "source": {"suggestionTitle": "Chili con carne", "kind": "known"}},
+            {"name": "hakket oksekød", "quantity": "500 g",
+             "source": {"suggestionTitle": "Lasagne", "kind": "known"}},
+            {"name": "løg", "quantity": "2",
+             "source": {"suggestionTitle": "Chili con carne", "kind": "known"}},
+            {"name": "kaffe", "quantity": "", "note": "the strong one"},
+            {"name": "salt", "quantity": ""},
+        ],
+    )
+
+    body = client.post("/api/shopping-list/export/reminders", json={}).json()
+
+    assert body["items"] == [
+        # Capitalised like a list item; the subtext is amount · what it's for.
+        {"title": "Hakket oksekød", "notes": "1000 g · Chili con carne 500; Lasagne 500"},
+        {"title": "Løg", "notes": "2 · Chili con carne"},
+        {"title": "Kaffe", "notes": "the strong one"},
+        {"title": "Salt", "notes": ""},
+    ]
+
+
+def test_reminders_export_can_send_just_the_selected_rows(client) -> None:
+    _add(client, [{"name": "Milk", "quantity": "1 l"}, {"name": "Eggs", "quantity": "6"}])
+    eggs = next(r for r in client.get("/api/shopping-list").json() if r["name"] == "Eggs")
+
+    body = client.post(
+        "/api/shopping-list/export/reminders", json={"lineIds": eggs["lineIds"]}
+    ).json()
+
+    assert body["items"] == [{"title": "Eggs", "notes": "6"}]
+
+
+
+# --- Offers keep their shop; the list is grouped by shop ------------------------
+
+
+def _offer(shop: str, slug: str | None, product: str, price: float | None = 20) -> dict:
+    return {"shop": shop, "shopSlug": slug, "productName": product, "price": price}
+
+
+def test_rows_keep_their_offer_and_are_grouped_by_shop(client) -> None:
+    _add(
+        client,
+        [
+            {"name": "salt"},
+            {"name": "agurk", "offer": _offer("REMA 1000", "rema-1000", "Agurk", 6)},
+            {"name": "hakket oksekød", "offer": _offer("Netto", "netto", "Hakket oksekød", 35)},
+            {"name": "mælk"},
+            {"name": "avocado", "offer": _offer("365discount", "coop-365", "Spisemodne avocadoer")},
+            {"name": "bacon", "offer": _offer("Netto", "netto", "Brunchy bacon", 12.95)},
+        ],
+    )
+
+    rows = client.get("/api/shopping-list").json()
+
+    # The catalog's shop order (Netto, Rema 1000, … Coop 365), each shop's rows
+    # in the order they were added, and what isn't on offer last.
+    assert [r["name"] for r in rows] == [
+        "hakket oksekød", "bacon", "agurk", "avocado", "salt", "mælk",
+    ]
+    assert rows[0]["offers"] == [_offer("Netto", "netto", "Hakket oksekød", 35)]
+    assert rows[-1]["offers"] == []
+
+
+def test_exports_carry_the_shop(client) -> None:
+    _add(
+        client,
+        [
+            {"name": "mælk", "quantity": "1 l"},
+            {"name": "bacon", "quantity": "150 g", "offer": _offer("Netto", "netto", "Brunchy bacon", 12.95)},
+        ],
+    )
+
+    text = client.get("/api/shopping-list/export.txt").text
+    reminders = client.post("/api/shopping-list/export/reminders", json={}).json()["items"]
+
+    # A heading per shop, the offer on the line, and the rest under "Other".
+    assert "\nNetto\n[ ] bacon — 150 g · tilbud: Brunchy bacon, 12,95 kr\n" in text
+    assert "\nOther\n[ ] mælk — 1 l\n" in text
+    assert reminders == [
+        {"title": "Bacon", "notes": "Netto: Brunchy bacon (12,95 kr) · 150 g"},
+        {"title": "Mælk", "notes": "1 l"},
+    ]
+
+
+def test_exports_name_a_shop_by_its_chain_not_its_dealer(client) -> None:
+    _add(client, [{"name": "avocado", "offer": _offer("365discount", "coop-365", "Avocado", 10)}])
+
+    reminders = client.post("/api/shopping-list/export/reminders", json={}).json()["items"]
+
+    assert reminders == [{"title": "Avocado", "notes": "Coop 365: Avocado (10 kr)"}]
+    assert "\nCoop 365\n" in client.get("/api/shopping-list/export.txt").text

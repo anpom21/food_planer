@@ -12,6 +12,7 @@ no API versioning, no custom error envelope.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import logging
@@ -53,8 +54,10 @@ from .discounts import (
     bare_ref,
     is_food,
     offer_refs,
+    resolve_dealer,
     review_prompt,
     select_offers,
+    with_shop_slugs,
 )
 from .fridge import (
     SCAN_PROMPT,
@@ -91,9 +94,10 @@ from .recipes.matching import (
 from .shopping_list import (
     merge_shopping_list,
     shopping_list_csv,
+    shopping_list_reminders,
     shopping_list_text,
 )
-from .shops import DANISH_CHAINS, icon_path, shop_catalog, slugify
+from .shops import DANISH_CHAINS, icon_path, save_icon, shop_catalog, slugify
 from .store import Store, new_id
 
 log = logging.getLogger("food_planer.planning")
@@ -158,12 +162,9 @@ class Dish(DishIn):
 
 
 class PlanningSettings(BaseModel):
-    """Per-Profile planning preferences (ADR 0001), stored inline on the Profile.
-
-    The Settings screen (a later ticket) owns editing these; here they only need
-    a sensible default so a freshly-identified Profile is immediately plannable
-    and ``GET /api/profiles/{id}`` has something to embed.
-    """
+    """The household's planning preferences — one set for everyone, stored in
+    ``data/settings.json``. Every field has a default, so a fresh install is
+    plannable straight away."""
 
     daysToPlan: int = 7
     suggestionsPerDay: int = 2
@@ -178,32 +179,25 @@ class PlanningSettings(BaseModel):
     recipeMode: Literal["only", "mix", "none"] = "mix"
 
 
-class IdentifyIn(BaseModel):
-    email: str = Field(min_length=1)
-    name: str = Field(min_length=1)
-
-
-class ProfileSummary(BaseModel):
-    """The switcher list row — no embedded settings; that's the {id} read."""
-
-    id: str
-    email: str
-    name: str
-
-
-class Profile(ProfileSummary):
-    settings: PlanningSettings
-
-
 class ShoppingSource(BaseModel):
     suggestionTitle: str
     kind: str
+
+
+class ShoppingOffer(BaseModel):
+    """The tilbudsavis offer an ingredient was on when it was added."""
+
+    shop: str  # as Tjek names the dealer, e.g. "365discount"
+    shopSlug: str | None = None  # its settings slug, e.g. "coop-365"
+    productName: str
+    price: float | None = None
 
 
 class ShoppingItemIn(BaseModel):
     name: str = Field(min_length=1)
     quantity: str = ""
     source: ShoppingSource | None = None
+    offer: ShoppingOffer | None = None
     # A free-text note for a hand-added item ("we're just out") — it rides to
     # the CSV export's Notes column for rows that have no dish behind them.
     note: str = ""
@@ -213,14 +207,19 @@ class RemoveItemsIn(BaseModel):
     lineIds: list[str]
 
 
+class RemindersExportIn(BaseModel):
+    # Only the rows behind these line ids; all rows when omitted.
+    lineIds: list[str] | None = None
+
+
 # --- PlanningRuns (issue #23) ----------------------------------------------
 
 
 class SettingsOverride(BaseModel):
     """The just-for-this-run adjustment behind the settings chip.
 
-    Applied on top of the Profile's saved PlanningSettings for a single run and
-    never written back — the Profile's defaults survive untouched.
+    Applied on top of the household's saved PlanningSettings for a single run
+    and never written back — the saved defaults survive untouched.
     """
 
     daysToPlan: int
@@ -229,7 +228,6 @@ class SettingsOverride(BaseModel):
 
 
 class PlanningRunIn(BaseModel):
-    profileId: str
     settingsOverride: SettingsOverride | None = None
 
 
@@ -238,6 +236,9 @@ class SuggestionIngredient(BaseModel):
     quantity: str  # free text: "200 g", "1 pinch"
     # "fresh" (in the fridge) or "staple" (in the pantry) when we have it.
     have: str | None = None
+    # A recipe dish's sub-list the line sits under ("Til servering"); null for
+    # the main list and for dishes the model wrote.
+    group: str | None = None
 
 
 class SuggestionRecipe(BaseModel):
@@ -273,8 +274,6 @@ class DayPlan(BaseModel):
 class PlanningRun(BaseModel):
     id: str
     createdAt: str
-    profileId: str
-    profileName: str
     status: str  # "success" | "partial" | "failed"
     days: list[DayPlan]
     dayCount: int
@@ -297,8 +296,6 @@ class PlanningRunSummary(BaseModel):
 
     id: str
     createdAt: str
-    profileId: str
-    profileName: str
     dayCount: int
     status: str
     fridgeSnippet: str = ""
@@ -318,10 +315,8 @@ class PromptIn(BaseModel):
 
 
 class PromptPreviewIn(BaseModel):
-    """Render a template and offer limit (the saved ones when omitted) for
-    one Profile."""
+    """Render a template and offer limit (the saved ones when omitted)."""
 
-    profileId: str
     template: str | None = None
     offerLimit: int | None = Field(default=None, ge=0, le=OFFER_LIMIT_CEILING)
 
@@ -411,12 +406,29 @@ class RecipeMatchOut(RecipeCard):
     offers: list[RecipeOfferUse]
 
 
-def _normalize_email(email: str) -> str:
-    """Email is the lookup key, so fold case and trim before matching/storing.
+def _settings(store: Store) -> dict:
+    """The household's planning settings, with defaults for anything unset."""
+    return PlanningSettings(**store["settings"].read()).model_dump()
 
-    Keeps "Ada@Example.com " and "ada@example.com" from becoming two Profiles.
-    """
-    return email.strip().lower()
+
+def _adopt_profile_settings(store: Store) -> None:
+    """One-off migration from the per-profile era: a household with no saved
+    settings yet takes the first profile's from ``profiles.json`` that has
+    any. The old file is left on disk untouched; an unreadable one is skipped."""
+    legacy = store.data_dir / "profiles.json"
+    if store["settings"].read() or not legacy.exists():
+        return
+    try:
+        profiles = json.loads(legacy.read_text("utf-8")) or []
+    except (OSError, ValueError):
+        log.warning("ignoring unreadable legacy %s", legacy)
+        return
+    settings = next(
+        (p.get("settings") for p in profiles if isinstance(p, dict) and p.get("settings")),
+        None,
+    )
+    if settings:
+        store["settings"].seed(PlanningSettings(**settings).model_dump())
 
 
 def create_app(
@@ -427,9 +439,13 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="Food Planner")
     app.state.store = Store(data_dir)
+    _adopt_profile_settings(app.state.store)
     app.state.openai_client = openai_client or RealOpenAIClient()
     app.state.tjek_client = tjek_client or RealTjekClient()
     app.state.offer_catalog = OfferCatalog()
+    # Chains whose logo has been tried this run, so a chain Tjek has no logo
+    # for isn't asked again on every page load.
+    app.state.logo_attempts = set()
 
     api = APIRouter(prefix="/api")
 
@@ -437,71 +453,25 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    # --- Profiles: identify & switch (issue #17) ---------------------------
-    # Email is a backend lookup key; the frontend keeps only a profileId
-    # pointer in localStorage, so the backend is the single source of truth.
+    # --- Settings: the household's planning preferences, one set ----------
 
-    @api.post("/profiles/identify", response_model=Profile)
-    async def identify_profile(
-        body: IdentifyIn, store: Store = Depends(get_store)
+    @api.get("/settings", response_model=PlanningSettings)
+    def get_settings(store: Store = Depends(get_store)) -> dict:
+        return _settings(store)
+
+    @api.put("/settings", response_model=PlanningSettings)
+    async def save_settings(
+        body: PlanningSettings, store: Store = Depends(get_store)
     ) -> dict:
-        email = _normalize_email(body.email)
-        name = body.name.strip()
-
-        def find_or_create(profiles: list) -> dict:
-            # The find-or-create decision lives inside the file lock so two
-            # people typing the same new email can't create a duplicate.
-            for profile in profiles:
-                if profile["email"] == email:
-                    return profile  # existing wins; the typed name is discarded
-            record = {
-                "id": new_id(),
-                "email": email,
-                "name": name,
-                "settings": PlanningSettings().model_dump(),
-            }
-            profiles.append(record)
-            return record
-
-        return await store["profiles"].update(find_or_create)
-
-    @api.get("/profiles", response_model=list[ProfileSummary])
-    def list_profiles(store: Store = Depends(get_store)) -> list[dict]:
-        return store["profiles"].read()
-
-    @api.get("/profiles/{profile_id}", response_model=Profile)
-    def get_profile(
-        profile_id: str, store: Store = Depends(get_store)
-    ) -> dict:
-        for profile in store["profiles"].read():
-            if profile["id"] == profile_id:
-                return profile
-        raise HTTPException(status_code=404, detail="Profile not found")
-
-    @api.put("/profiles/{profile_id}/settings", response_model=Profile)
-    async def update_settings(
-        profile_id: str,
-        body: PlanningSettings,
-        store: Store = Depends(get_store),
-    ) -> dict:
-        """Save a Profile's PlanningSettings alone (issue #19, ADR 0001).
-
-        The Settings screen never round-trips name and email just to save a
-        slider: the body is the settings and nothing else. Full replace of the
-        inline ``settings`` block, so any field the caller omits reverts to its
-        default. Only the named Profile is touched, so one person's save can't
-        overwrite their partner's preferences.
-        """
+        """A full replace: an omitted field reverts to its default."""
         settings = body.model_dump()
 
-        def replace_settings(profiles: list) -> dict:
-            for profile in profiles:
-                if profile["id"] == profile_id:
-                    profile["settings"] = settings
-                    return profile
-            raise HTTPException(status_code=404, detail="Profile not found")
+        def replace(stored: dict) -> dict:
+            stored.clear()
+            stored.update(settings)
+            return stored
 
-        return await store["profiles"].update(replace_settings)
+        return await store["settings"].update(replace)
 
     @api.get("/dishes", response_model=list[Dish])
     def list_dishes(store: Store = Depends(get_store)) -> list[dict]:
@@ -663,6 +633,7 @@ def create_app(
                 "name": item.name,
                 "quantity": item.quantity,
                 "source": item.source.model_dump() if item.source else None,
+                "offer": item.offer.model_dump() if item.offer else None,
                 "note": item.note,
             }
             for item in body
@@ -705,6 +676,18 @@ def create_app(
     def export_shopping_list_text(store: Store = Depends(get_store)) -> PlainTextResponse:
         return PlainTextResponse(shopping_list_text(_rows(store)))
 
+    @api.post("/shopping-list/export/reminders")
+    def export_shopping_list_reminders(
+        body: RemindersExportIn, store: Store = Depends(get_store)
+    ) -> dict:
+        """The list as reminders for the iOS Shortcut that adds them to
+        Påmindelser: every row, or only the rows behind ``lineIds``."""
+        rows = _rows(store)
+        if body.lineIds is not None:
+            wanted = set(body.lineIds)
+            rows = [r for r in rows if wanted & set(r["lineIds"])]
+        return {"items": shopping_list_reminders(rows)}
+
     @api.get("/shopping-list/export.csv")
     def export_shopping_list_csv(store: Store = Depends(get_store)) -> Response:
         return Response(
@@ -746,17 +729,10 @@ def create_app(
             return max(MAX_PROMPT_RECIPES, min(2 * slots, 100))
         return MAX_PROMPT_RECIPES
 
-    async def _profile_offers(store: Store, profile_id: str | None, tjek, catalog) -> list[dict]:
-        """Every food offer at a Profile's shops; none without a Profile."""
-        if profile_id is None:
-            return []
-        profile = next(
-            (p for p in store["profiles"].read() if p["id"] == profile_id), None
-        )
-        if profile is None:
-            raise HTTPException(status_code=404, detail="Profile not found")
+    async def _household_offers(store: Store, tjek, catalog) -> list[dict]:
+        """Every food offer at the household's preferred shops."""
         _, food_offers, _ = await _run_offers(
-            profile["settings"], store["dishes"].read(), tjek, catalog, _offer_limit(store)
+            _settings(store), store["dishes"].read(), tjek, catalog, _offer_limit(store)
         )
         return food_offers
 
@@ -822,7 +798,8 @@ def create_app(
                     first_paragraph(recipe.get("description")) or suggestion.get("description", "")
                 )
                 suggestion["ingredients"] = [
-                    parse_ingredient_line(i["text"]) for i in recipe.get("ingredients", [])
+                    {**parse_ingredient_line(i["text"]), "group": i.get("group")}
+                    for i in recipe.get("ingredients", [])
                 ]
                 suggestion["discounts"] = []
                 suggestion["prepTimeMinutes"] = (
@@ -841,7 +818,7 @@ def create_app(
         )
 
     # --- The planning prompt: one household-wide, editable template ---------
-    # Values derived from the library and a Profile's settings are injected
+    # Values derived from the library and the household's settings are injected
     # wherever a {{variable}} appears. A template naming a variable the planner
     # can't fill is refused on save, so a typo never reaches the model.
 
@@ -903,12 +880,7 @@ def create_app(
         """The prompt a run would send right now, split into the template's own
         text and each injected value — so the editor can highlight what came
         from where. Nothing is saved and the model is not called."""
-        profile = next(
-            (p for p in store["profiles"].read() if p["id"] == body.profileId),
-            None,
-        )
-        if profile is None:
-            raise HTTPException(status_code=404, detail="Profile not found")
+        settings = _settings(store)
         template = (
             body.template
             if body.template is not None
@@ -917,12 +889,10 @@ def create_app(
         _check_template(template)
         dishes = store["dishes"].read()
         limit = body.offerLimit if body.offerLimit is not None else _offer_limit(store)
-        offers, food_offers, _ = await _run_offers(
-            profile["settings"], dishes, tjek, catalog, limit
-        )
+        offers, food_offers, _ = await _run_offers(settings, dishes, tjek, catalog, limit)
         fridge = store["fridge"].read()
-        recipes = _run_recipes(store, fridge, food_offers, _recipe_limit(profile["settings"]))
-        values = prompt_values(dishes, profile["settings"], offers, fridge, recipes)
+        recipes = _run_recipes(store, fridge, food_offers, _recipe_limit(settings))
+        values = prompt_values(dishes, settings, offers, fridge, recipes)
         return {"segments": render_prompt_segments(template, values)}
 
     # --- PlanningRuns: one button, one pass, a whole week (issue #23) -------
@@ -939,16 +909,9 @@ def create_app(
         tjek: TjekClient = Depends(get_tjek_client),
         catalog: OfferCatalog = Depends(get_offer_catalog),
     ) -> dict:
-        profile = next(
-            (p for p in store["profiles"].read() if p["id"] == body.profileId),
-            None,
-        )
-        if profile is None:
-            raise HTTPException(status_code=404, detail="Profile not found")
-
         # The override lives on top of the saved settings for this run only; it
-        # is never persisted back onto the Profile.
-        settings = dict(profile["settings"])
+        # is never persisted back.
+        settings = _settings(store)
         if body.settingsOverride is not None:
             settings.update(body.settingsOverride.model_dump())
 
@@ -961,7 +924,6 @@ def create_app(
         # looks wrong.
         trace: dict = {
             "runId": run_id,
-            "profile": {"id": profile["id"], "name": profile["name"]},
             "settings": settings,
             "settingsOverride": (
                 body.settingsOverride.model_dump() if body.settingsOverride else None
@@ -970,8 +932,8 @@ def create_app(
             "calls": [],
         }
         log.info(
-            "run %s: planning for %s with settings %s%s",
-            run_id, profile["name"], json.dumps(settings, ensure_ascii=False),
+            "run %s: planning with settings %s%s",
+            run_id, json.dumps(settings, ensure_ascii=False),
             " (per-run override applied)" if body.settingsOverride else "",
         )
 
@@ -1122,8 +1084,6 @@ def create_app(
         record = {
             "id": run_id,
             "createdAt": datetime.now(timezone.utc).isoformat(),
-            "profileId": profile["id"],
-            "profileName": profile["name"],
             "status": status,
             "days": days,
             "dayCount": len(days),
@@ -1180,6 +1140,7 @@ def create_app(
     ) -> dict:
         for run in store["planning_runs"].read():
             if run["id"] == run_id:
+                with_shop_slugs(run.get("days", []))
                 return run
         raise HTTPException(status_code=404, detail="Planning run not found")
 
@@ -1188,14 +1149,13 @@ def create_app(
 
     @api.get("/recipes", response_model=list[RecipeCard])
     async def list_recipes(
-        profileId: str | None = None,
         store: Store = Depends(get_store),
         tjek: TjekClient = Depends(get_tjek_client),
         catalog: OfferCatalog = Depends(get_offer_catalog),
     ) -> list[dict]:
-        """Every imported recipe as a card. With a ``profileId`` the cards also
-        show this week's offers at that Profile's shops."""
-        food_offers = await _profile_offers(store, profileId, tjek, catalog)
+        """Every imported recipe as a card, with this week's offers at the
+        household's shops."""
+        food_offers = await _household_offers(store, tjek, catalog)
         recipes = load_all_recipes(store.data_dir)
         on_hand = OnHand.from_fridge(store["fridge"].read())
         matched = {m.recipe["url"]: m for m in match_recipes(recipes, on_hand, food_offers)}
@@ -1203,18 +1163,16 @@ def create_app(
 
     @api.get("/recipes/matches", response_model=list[RecipeMatchOut])
     async def list_recipe_matches(
-        profileId: str,
         store: Store = Depends(get_store),
         tjek: TjekClient = Depends(get_tjek_client),
         catalog: OfferCatalog = Depends(get_offer_catalog),
     ) -> list[dict]:
         """Every dinner recipe that uses a fresh item or one of this week's
-        offers at the Profile's shops, best first — the same ranking the
+        offers at the household's shops, best first — the same ranking the
         planner uses, with ``inPrompt`` marking the ones it actually sees
-        (none when the Profile doesn't use online recipes)."""
-        food_offers = await _profile_offers(store, profileId, tjek, catalog)
-        profile = next(p for p in store["profiles"].read() if p["id"] == profileId)
-        limit = _recipe_limit(profile["settings"])
+        (none when the household doesn't use online recipes)."""
+        food_offers = await _household_offers(store, tjek, catalog)
+        limit = _recipe_limit(_settings(store))
         fridge = store["fridge"].read()
         on_hand = OnHand.from_fridge(fridge)
         matches = _run_recipes(store, fridge, food_offers, None)
@@ -1242,8 +1200,53 @@ def create_app(
     # Backend-owned so the discount fetcher and the pill picker share one
     # canonical slug↔chain mapping. Logos live under data/icons/<slug>.<ext>.
 
+    async def _fetch_missing_logos(
+        store: Store, tjek: TjekClient, catalog: OfferCatalog, attempts: set[str]
+    ) -> None:
+        """Download the logo of every chain that has none yet, from its Tjek
+        dealer, into data/icons/. Each chain is tried once per run; a chain
+        Tjek doesn't carry (or a failed download) keeps its initials badge."""
+        icons = store.data_dir / "icons"
+        missing = [
+            name
+            for name in DANISH_CHAINS
+            if slugify(name) not in attempts and icon_path(icons, slugify(name)) is None
+        ]
+        if not missing:
+            return
+        attempts.update(slugify(name) for name in missing)
+        try:
+            dealers = await catalog.dealers(tjek)
+        except Exception:
+            log.warning("shop logos: could not list Tjek dealers", exc_info=True)
+            return
+
+        async def fetch(name: str) -> None:
+            dealer = resolve_dealer(name, dealers)
+            url = dealer and dealer.get("logo")
+            if not url:
+                log.info("shop logos: Tjek has no logo for %s", name)
+                return
+            try:
+                data, media_type = await tjek.fetch_image(url)
+            except Exception:
+                log.warning("shop logos: could not fetch %s's logo", name, exc_info=True)
+                return
+            if save_icon(icons, slugify(name), data, media_type) is None:
+                log.warning("shop logos: %s's logo is not a usable image (%s)", name, media_type)
+
+        await asyncio.gather(*(fetch(name) for name in missing))
+
     @api.get("/shops", response_model=list[Shop])
-    def list_shops(store: Store = Depends(get_store)) -> list[dict]:
+    async def list_shops(
+        request: Request,
+        store: Store = Depends(get_store),
+        tjek: TjekClient = Depends(get_tjek_client),
+        catalog: OfferCatalog = Depends(get_offer_catalog),
+    ) -> list[dict]:
+        # Logos come from the chains' Tjek dealers the first time they're
+        # needed; anything already in data/icons/ (or dropped in by hand) wins.
+        await _fetch_missing_logos(store, tjek, catalog, request.app.state.logo_attempts)
         return shop_catalog(store.data_dir / "icons")
 
     @api.get("/shops/{slug}/icon")

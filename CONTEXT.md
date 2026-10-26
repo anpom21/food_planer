@@ -5,11 +5,8 @@ A household tool that turns fridge contents, standing preferences, and a persona
 ## Language
 
 **Household**:
-The single local install of the app, shared by everyone living there. Owns the shared Dish library and shared FridgeContext; has one or more Profiles.
-
-**Profile**:
-One person living in the Household (e.g. "Andreas", a partner). Owns its own PlanningSettings. Does not have a separate Dish library or FridgeContext — those are shared at the Household level.
-_Avoid_: User, account (implies auth/multi-tenant signup, which this is not)
+The single local install of the app, shared by everyone living there. Owns everything: one set of PlanningSettings, the Dish library, the Fridge, the ShoppingList and every PlanningRun. There are no per-person profiles or logins.
+_Avoid_: Profile, user, account (per-person profiles existed early on and were removed; nothing is per person)
 
 **Dish**:
 An entry in the Household's shared library of meals the person likes to make — by definition a *known dish*. Has a title, and optional (+) details: ingredients, recipe/instructions, and recipe variants (substitutes). Can carry Tags.
@@ -52,10 +49,10 @@ The pick-list per kind: a built-in basic set plus every name the Household has a
 Photos sent once to the LLM, which returns named, classified items for the Household to review before any are added. The photos are not kept.
 
 **PlanningSettings**:
-Per-Profile configuration for a planning run: number of days to plan, suggestions per day (default 3/day), known-vs-unknown dish preference, priority order (cheap / quick & easy / delicious / healthy), preferred shops, Inspiration text, and how much to use online recipes (only / half and half / none).
+The Household's configuration for planning runs, opened from the ⚙: number of days to plan, suggestions per day (default 3/day), known-vs-unknown dish preference, priority order (cheap / quick & easy / delicious / healthy), preferred shops, Inspiration text, and how much to use online recipes (only / half and half / none).
 
 **PlanningRun**:
-One invocation of the LLM for a given Profile, producing a set of Suggestions for the configured number of days.
+One invocation of the LLM, producing a set of Suggestions for the configured number of days.
 
 **Suggestion**:
 One LLM-generated meal recommendation produced by a PlanningRun: title, brief description, ingredients, and possibly more. May optionally reference the Dish it was pulled from (`sourceDish`) — a known dish; if absent, it's an unknown dish the LLM invented.
@@ -70,7 +67,7 @@ The set of Offers gathered for a single PlanningRun, filtered down to food and r
 _Avoid_: Discounts, offer list
 
 **Imported recipe**:
-A recipe scraped from a recipe website (valdemarsro.dk so far) into local JSON: title, link, thumbnail, ingredient lines, instructions, times, servings. Not part of the Household's Dish library. A PlanningRun only sees the dinner ones that use a fresh item or an Offer, ranked and capped. A Suggestion based on one *is* that recipe, 1:1 — title, ingredient lines, time and rough price come from the recipe, not the model — and links back to it (its `recipe`). Browsed on the Inspiration screen.
+A recipe scraped from a recipe website (valdemarsro.dk so far) into local JSON: title, link, thumbnail, ingredient lines, instructions, times, servings. Not part of the Household's Dish library. A PlanningRun only sees the dinner ones that use a fresh item or an Offer, ranked and capped. A Suggestion based on one *is* that recipe, 1:1 — title, ingredient lines, time and rough price come from the recipe, not the model — and links back to it (its `recipe`). Browsed on the Dishes tab, next to the Dish library; ☆ saves one into the library as a Dish.
 _Avoid_: Dish (that's the Household's own library), Recipe on its own (ambiguous with a Dish's recipe text)
 
 **On hand**:
@@ -80,7 +77,7 @@ An ingredient the Household already has — a fresh item (🥬) or a pantry stap
 The model's check of an Offer tied to an ingredient by name when the match isn't 1:1 (a compound like "frilandsæg" for "æg", a multipack, a long heading). Exact matches are tied straight away; review matches only once the model confirms them (`matchedBy: "review"`). In the planning prompt, an Imported recipe's uncertain offers are marked "check offer" for the planner to judge.
 
 **ShoppingList**:
-One persistent, household-wide list of ingredients to buy. Accumulates items from any Profile's Suggestions over time (not scoped to a single PlanningRun or week) and is only cleared as items are ticked off / bought.
+One persistent, household-wide list of ingredients to buy. Accumulates items from Suggestions and Imported recipes over time (not scoped to a single PlanningRun or week) and is only cleared as items are ticked off / bought.
 _Avoid_: Ingredients list (both names were used loosely in early discussion; ShoppingList is the canonical term)
 
 **ShoppingList item**:

@@ -17,6 +17,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .clients import TjekClient
+from .shops import DANISH_CHAINS, slugify
 
 log = logging.getLogger(__name__)
 
@@ -399,6 +400,33 @@ def bare_ref(ref: str | None) -> str:
     return (ref or "").strip().strip("[]").strip()
 
 
+def shop_slug(dealer_name: str | None) -> str | None:
+    """The settings slug of the chain a Tjek dealer belongs to ("365discount"
+    → "coop-365", "REMA 1000" → "rema-1000"), or ``None`` for a dealer that
+    isn't one of the known chains. The inverse of :func:`resolve_dealer`, so
+    an offer can be shown only while its shop is selected in settings."""
+    folded = _fold(dealer_name or "")
+    if not folded:
+        return None
+    # Longest chain name first, so a longer, more specific name wins.
+    for chain in sorted(DANISH_CHAINS, key=lambda c: -len(DEALER_ALIASES.get(c, c))):
+        wanted = _fold(DEALER_ALIASES.get(chain, chain))
+        if wanted and wanted in folded:
+            return slugify(chain)
+    return None
+
+
+def with_shop_slugs(days: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fill in ``shopSlug`` on every stored discount that lacks it, in place —
+    runs made before the field existed still filter by shop."""
+    for day in days:
+        for suggestion in day.get("suggestions", []):
+            for discount in suggestion.get("discounts", []):
+                if "shopSlug" not in discount:
+                    discount["shopSlug"] = shop_slug(discount.get("shop"))
+    return days
+
+
 def denormalize_discount(
     offer: dict[str, Any], matched_ingredient: str | None, matched_by: str
 ) -> dict[str, Any]:
@@ -413,6 +441,9 @@ def denormalize_discount(
         "productName": offer["item_name"],
         "description": offer.get("description"),
         "shop": offer["shop"],
+        # The settings slug of that shop, so a dish only shows an offer while
+        # its shop is selected (see shop_slug).
+        "shopSlug": shop_slug(offer["shop"]),
         "price": offer.get("price"),
         "originalPrice": offer.get("pre_price"),
         "discountPercent": offer.get("discount_percent"),

@@ -16,9 +16,9 @@ frontend/           React shell (Vite + TypeScript)
 data/               gitignored; one JSON file per entity type, created on first run
 ```
 
-`data/` holds `profiles.json`, `dishes.json`, `planning_runs.json`,
-`fridge_context.json`, `shopping_list.json`, plus `data/fridge_images/` and
-`data/icons/`. It is created on first run and is never committed.
+`data/` holds `settings.json`, `dishes.json`, `planning_runs.json`,
+`fridge.json`, `prompt.json`, `shopping_list.json`, plus `data/recipes/`,
+`data/fridge_images/` and `data/icons/`. It is created on first run and is never committed.
 
 ## Requirements
 

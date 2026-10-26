@@ -11,7 +11,7 @@ import {
 // one household-wide template: anything written as {{variable}} is filled in
 // by the backend on every run. Clicking a variable chip inserts it at the
 // cursor, and each {{variable}} in the text is coloured as you type. Preview
-// renders the draft for the current Profile with every injected value
+// renders the draft with every injected value
 // highlighted, so it's clear which text came from where.
 
 const VARIABLE = /\{\{\s*(\w+)\s*\}\}/g;
@@ -47,13 +47,7 @@ function highlight(template: string, known: Set<string>): React.ReactNode[] {
   return nodes;
 }
 
-export function PromptEditor({
-  profileId,
-  onClose,
-}: {
-  profileId: string;
-  onClose: () => void;
-}) {
+export function PromptEditor({ onClose }: { onClose: () => void }) {
   const [config, setConfig] = useState<PromptConfig | null>(null);
   const [draft, setDraft] = useState("");
   const [limit, setLimit] = useState(0);
@@ -125,7 +119,7 @@ export function PromptEditor({
   };
 
   const showPreview = () =>
-    run(async () => setPreview(await previewPrompt(profileId, draft, limit)));
+    run(async () => setPreview(await previewPrompt(draft, limit)));
 
   const save = () =>
     run(async () => {

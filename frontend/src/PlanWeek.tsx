@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
-import { BiasSlider, PlanningSettingsForm, Stepper } from "./SettingsScreen";
-import { OfferCard, OfferTag, offerFor } from "./OfferTag";
+import { useHousehold } from "./household";
+import { BiasSlider, Stepper } from "./SettingsScreen";
+import { OfferCard, OfferTag, offerFor, runAtSelectedShops } from "./OfferTag";
+import { orderedIngredients } from "./ingredientOrder";
 import { OnHandBadge } from "./OnHand";
 import { RecipeButton, RecipeFacts, RecipeThumb } from "./RecipeLink";
 import {
   addShoppingItems,
+  getFridge,
   getPlanningRun,
   listDishes,
   listPlanningRuns,
@@ -12,7 +15,7 @@ import {
   type Dish,
   type PlanningRun,
   type PlanningRunSummary,
-  type Profile,
+  type PlanningSettings,
   type SettingsOverride,
   type ShoppingItemInput,
   type Suggestion,
@@ -28,13 +31,12 @@ import {
 // Issue #25 — Per-run settings override: the chip is a button that opens a
 // modal to bend days, suggestions-per-day and the known-vs-unknown lean for
 // *this run only*. The override is applied to one prompt and never written back
-// to the Profile, so planning a short week never means editing (and forgetting
-// to restore) your saved defaults.
+// to the saved settings, so planning a short week never means editing (and
+// forgetting to restore) your defaults.
 
-// The three fields the profile carries that a per-run override can bend. The
-// chip and the modal both read the override when present, else the defaults.
-function defaultsOf(profile: Profile): SettingsOverride {
-  const s = profile.settings;
+// The three settings a per-run override can bend. The chip and the modal both
+// read the override when present, else the defaults.
+function defaultsOf(s: PlanningSettings): SettingsOverride {
   return {
     daysToPlan: s.daysToPlan,
     suggestionsPerDay: s.suggestionsPerDay,
@@ -70,12 +72,14 @@ function OverrideModal({
   defaults,
   onChange,
   onReset,
+  onEditDefaults,
   onClose,
 }: {
   draft: SettingsOverride;
   defaults: SettingsOverride;
   onChange: (draft: SettingsOverride) => void;
   onReset: () => void;
+  onEditDefaults: () => void;
   onClose: () => void;
 }) {
   const isOverridden = !sameAsDefaults(draft, defaults);
@@ -124,6 +128,9 @@ function OverrideModal({
             disabled={!isOverridden}
           >
             Reset to my defaults
+          </button>
+          <button type="button" className="link-btn" onClick={onEditDefaults}>
+            Change the defaults…
           </button>
           <button className="btn primary" onClick={onClose}>
             Done
@@ -253,18 +260,20 @@ export function DetailsModal({
         )}
         <p>{suggestion.description}</p>
         <h3>Ingredients</h3>
-        <ul className="ing-list">
-          {suggestion.ingredients.map((ing, i) => {
-            const offer = offerFor(ing, suggestion.discounts);
-            return (
-              <li key={i}>
-                <span className="ing-q">{ing.quantity}</span> {ing.name}
-                <OnHandBadge have={ing.have} />
-                {offer && <OfferTag offer={offer} />}
-              </li>
-            );
-          })}
-        </ul>
+        {orderedIngredients(suggestion).map((group) => (
+          <div key={group.heading ?? ""}>
+            {group.heading && <h4 className="ing-subhead">{group.heading}</h4>}
+            <ul className="ing-list">
+              {group.rows.map(({ ingredient: ing, offer }, i) => (
+                <li key={i}>
+                  <span className="ing-q">{ing.quantity}</span> {ing.name}
+                  <OnHandBadge have={ing.have} />
+                  {offer && <OfferTag offer={offer} />}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
         {suggestion.discounts.length > 0 && (
           <>
             <h3>On offer this week</h3>
@@ -277,7 +286,7 @@ export function DetailsModal({
         )}
         <div className="modal-actions">
           {suggestion.recipe && <RecipeButton recipe={suggestion.recipe} />}
-          <button className="btn primary" onClick={onClose}>
+          <button className={suggestion.recipe ? "btn" : "btn primary"} onClick={onClose}>
             Close
           </button>
         </div>
@@ -368,10 +377,18 @@ export function IngredientReview({
       const kind = s.suggestion.sourceDish ? "known" : "unknown";
       for (const ing of s.suggestion.ingredients) {
         if (!ticked[ingKey(s.key, ing.name)]) continue;
+        const offer = offerFor(ing, s.suggestion.discounts);
         items.push({
           name: ing.name,
           quantity: ing.quantity,
           source: { suggestionTitle: s.suggestion.title, kind },
+          // Keep the shop: the list groups by it and the exports name it.
+          offer: offer && {
+            shop: offer.shop,
+            shopSlug: offer.shopSlug ?? null,
+            productName: offer.productName,
+            price: offer.price,
+          },
         });
       }
     }
@@ -416,35 +433,39 @@ export function IngredientReview({
                   {s.dayLabel} · {s.suggestion.ingredients.length} ingredients
                 </span>
               </div>
-              {s.suggestion.ingredients.map((ing, i) => {
-                const k = ingKey(s.key, ing.name);
-                const on = !!ticked[k];
-                const t = tints.get(norm(ing.name));
-                return (
-                  <label
-                    className={`ing-row${t ? ` tint-${t.tint}` : ""}${
-                      on ? "" : " off"
-                    }`}
-                    key={i}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={on}
-                      onChange={() =>
-                        setTicked((prev) => ({ ...prev, [k]: !prev[k] }))
-                      }
-                    />
-                    <span className="ing-row-q">{ing.quantity}</span>
-                    <span className="ing-row-nm">{ing.name}</span>
-                    <OnHandBadge have={ing.have} />
-                    {(() => {
-                      const offer = offerFor(ing, s.suggestion.discounts);
-                      return offer && <OfferTag offer={offer} />;
-                    })()}
-                    {t && <span className="ing-row-dup">in {t.count} dishes</span>}
-                  </label>
-                );
-              })}
+              {orderedIngredients(s.suggestion).flatMap((group) => [
+                group.heading && (
+                  <div className="ing-subhead" key={`h:${group.heading}`}>
+                    {group.heading}
+                  </div>
+                ),
+                ...group.rows.map(({ ingredient: ing, offer }, i) => {
+                  const k = ingKey(s.key, ing.name);
+                  const on = !!ticked[k];
+                  const t = tints.get(norm(ing.name));
+                  return (
+                    <label
+                      className={`ing-row${t ? ` tint-${t.tint}` : ""}${
+                        on ? "" : " off"
+                      }`}
+                      key={`${group.heading ?? ""}:${i}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() =>
+                          setTicked((prev) => ({ ...prev, [k]: !prev[k] }))
+                        }
+                      />
+                      <span className="ing-row-q">{ing.quantity}</span>
+                      <span className="ing-row-nm">{ing.name}</span>
+                      <OnHandBadge have={ing.have} />
+                      {offer && <OfferTag offer={offer} />}
+                      {t && <span className="ing-row-dup">in {t.count} dishes</span>}
+                    </label>
+                  );
+                }),
+              ])}
             </div>
           ))}
         </div>
@@ -481,7 +502,7 @@ function formatWhen(iso: string): string {
 }
 
 // Issue #26 — Past plans: every run the household has ever made stays
-// browsable forever, household-wide (not just this Profile's), newest first.
+// browsable forever, newest first.
 // Each row carries enough — when, how many days, its status, and the fridge
 // notes it was planned against — to find the run you mean without opening each
 // one. Picking a row loads that run onto the board.
@@ -536,7 +557,7 @@ function ArchiveModal({
                       </span>
                     </div>
                     <div className="archive-row-meta muted">
-                      {r.profileName} · {r.dayCount}{" "}
+                      {r.dayCount}{" "}
                       {r.dayCount === 1 ? "day" : "days"}
                     </div>
                     <div className="archive-fridge muted">
@@ -560,13 +581,9 @@ function ArchiveModal({
   );
 }
 
-export function PlanWeek({
-  profile,
-  onSettingsSaved,
-}: {
-  profile: Profile;
-  onSettingsSaved: (profile: Profile) => void;
-}) {
+export function PlanWeek() {
+  const { settings, go, notify, openSettings, refreshCounts } = useHousehold();
+  const [freshCount, setFreshCount] = useState<number | null>(null);
   const [dishes, setDishes] = useState<Dish[]>([]);
   const [run, setRun] = useState<PlanningRun | null>(null);
   const [planning, setPlanning] = useState(false);
@@ -592,7 +609,6 @@ export function PlanWeek({
   // Card selection — pure frontend state, gone on refresh, never persisted.
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [reviewing, setReviewing] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
   // The Past-plans archive modal (issue #26).
   const [browsing, setBrowsing] = useState(false);
 
@@ -600,20 +616,16 @@ export function PlanWeek({
     listDishes()
       .then(setDishes)
       .catch(() => setDishes([]));
+    getFridge()
+      .then((f) => setFreshCount(f.fresh.length))
+      .catch(() => setFreshCount(null));
   }, []);
-
-  // Switching profiles resets any pending override — it belonged to the person
-  // who was on screen, not the one now selected.
-  useEffect(() => {
-    setOverride(null);
-    setEditing(false);
-  }, [profile.id]);
 
   const dishesById = new Map(dishes.map((d) => [d.id, d]));
 
   // What the next run will actually be planned against: the override when set,
-  // otherwise the Profile's saved defaults.
-  const defaults = defaultsOf(profile);
+  // otherwise the household's saved defaults.
+  const defaults = defaultsOf(settings);
   const effective = override ?? defaults;
 
   // The modal edits a draft in place; storing null when it matches the defaults
@@ -626,7 +638,7 @@ export function PlanWeek({
     setPlanning(true);
     setError(null);
     try {
-      setRun(await planWeek(profile.id, override ?? undefined));
+      setRun(await planWeek(override ?? undefined));
       // A fresh plan replaces the board, so old selections no longer point at
       // anything — start clean.
       setSelectedKeys(new Set());
@@ -660,9 +672,13 @@ export function PlanWeek({
     });
   }
 
+  // What the board shows: the run, with offers only from shops selected in
+  // settings right now (the stored run keeps them all).
+  const board = run && runAtSelectedShops(run, settings.shops);
+
   // Selected cards in board order (day 1 → day N), ready for the review.
   const selected: Selected[] = [];
-  run?.days.forEach((day, dayIndex) => {
+  board?.days.forEach((day, dayIndex) => {
     day.suggestions.forEach((suggestion, suggIndex) => {
       const key = cardKey(dayIndex, suggIndex);
       if (selectedKeys.has(key))
@@ -675,10 +691,11 @@ export function PlanWeek({
       await addShoppingItems(items);
       setReviewing(false);
       setSelectedKeys(new Set());
-      setToast(
-        `${items.length} ingredient${items.length === 1 ? "" : "s"} added to the shopping list`,
-      );
-      setTimeout(() => setToast(null), 2600);
+      refreshCounts();
+      notify(`${items.length} ingredient${items.length === 1 ? "" : "s"} added`, {
+        label: "View list",
+        run: () => go("shopping"),
+      });
     } catch (e: unknown) {
       setError(String(e));
       setReviewing(false);
@@ -714,17 +731,6 @@ export function PlanWeek({
         </button>
       </div>
 
-      {/* The Profile's saved planning settings, folded away until wanted. The
-          chip above bends them for one run; this panel changes the defaults. */}
-      <details className="plan-settings">
-        <summary>⚙ Planning settings</summary>
-        <PlanningSettingsForm
-          key={profile.id}
-          profile={profile}
-          onSaved={onSettingsSaved}
-        />
-      </details>
-
       {browsing && (
         <ArchiveModal onPick={loadRun} onClose={() => setBrowsing(false)} />
       )}
@@ -735,6 +741,10 @@ export function PlanWeek({
           defaults={defaults}
           onChange={applyDraft}
           onReset={() => setOverride(null)}
+          onEditDefaults={() => {
+            setEditing(false);
+            openSettings();
+          }}
           onClose={() => setEditing(false)}
         />
       )}
@@ -769,9 +779,9 @@ export function PlanWeek({
         </div>
       )}
 
-      {run && run.days.length > 0 ? (
+      {board && board.days.length > 0 ? (
         <div className="plan-board">
-          {run.days.map((day, dayIndex) => (
+          {board.days.map((day, dayIndex) => (
             <div className="day-column" key={day.day}>
               <header className="day-head">Day {day.day}</header>
               <div className="day-stack">
@@ -794,10 +804,56 @@ export function PlanWeek({
         </div>
       ) : (
         !planning && (
-          <div className="empty-state">
+          // What the next plan will be made from, each one a tap from where
+          // it's changed — so the tabs read as one flow, not four screens.
+          <div className="plan-ready">
+            <h2>Ready when you are</h2>
             <p className="muted">
-              No plan on screen yet — hit “⚡ Plan my week”.
+              The plan is made from what's in your fridge, this week's offers at
+              your shops, your own dishes and online recipes.
             </p>
+            <ul className="ready-list">
+              <li>
+                <button className="ready-row" onClick={() => go("fridge")}>
+                  <span className="ready-icon">🥬</span>
+                  <span>
+                    <strong>{freshCount ?? "…"} fresh items</strong>
+                    <span className="muted"> to use up first</span>
+                  </span>
+                  <span className="ready-go" aria-hidden="true">›</span>
+                </button>
+              </li>
+              <li>
+                <button className="ready-row" onClick={openSettings}>
+                  <span className="ready-icon">🏷️</span>
+                  <span>
+                    <strong>
+                      {settings.shops.length} {settings.shops.length === 1 ? "shop" : "shops"}
+                    </strong>
+                    <span className="muted"> for offers</span>
+                  </span>
+                  <span className="ready-go" aria-hidden="true">›</span>
+                </button>
+              </li>
+              <li>
+                <button className="ready-row" onClick={() => go("dishes")}>
+                  <span className="ready-icon">🍲</span>
+                  <span>
+                    <strong>{dishes.length} of your dishes</strong>
+                    <span className="muted">
+                      {" "}
+                      ·{" "}
+                      {settings.recipeMode === "only"
+                        ? "only online recipes"
+                        : settings.recipeMode === "none"
+                          ? "no online recipes"
+                          : "plus online recipes"}
+                    </span>
+                  </span>
+                  <span className="ready-go" aria-hidden="true">›</span>
+                </button>
+              </li>
+            </ul>
           </div>
         )
       )}
@@ -844,7 +900,6 @@ export function PlanWeek({
         </div>
       )}
 
-      {toast && <div className="toast">✓ {toast}</div>}
     </section>
   );
 }

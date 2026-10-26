@@ -1,28 +1,34 @@
-"""Per-Profile PlanningSettings, saved on their own through the HTTP seam.
+"""The household's PlanningSettings, one shared set, through the HTTP seam.
 
-Issue #19 (parent PRD: Food Planner spec #14). The Settings screen edits a
-Profile's planning preferences — days-to-plan, suggestions-per-day, the
-known-vs-unknown lean, the priority order and the Inspiration text — and saves
-them without round-tripping name and email:
+The Settings screen edits the household's planning preferences — days-to-plan,
+suggestions-per-day, the known-vs-unknown lean, the priority order, preferred
+shops, the Inspiration text and the online-recipe mode:
 
-- ``PUT /api/profiles/{id}/settings`` takes settings alone;
+- ``GET /api/settings`` returns every field, defaulted on a fresh install;
+- ``PUT /api/settings`` is a full replace: it returns what was saved, and an
+  omitted field reverts to its default;
 - every field persists and reloads (proven by a fresh app against the same
   data/ directory);
-- saving under one Profile leaves another Profile's settings untouched
-  (ADR 0001: PlanningSettings are per-Profile);
-- an unknown id is a stock 404.
+- the priority order is saved as the chosen sequence;
+- a household from the per-profile era adopts the first profile's settings
+  from a legacy ``data/profiles.json`` once, leaving that file untouched — and
+  never over settings it already has.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-
-def _identify(client, email: str, name: str) -> dict:
-    return client.post(
-        "/api/profiles/identify", json={"email": email, "name": name}
-    ).json()
-
+DEFAULTS = {
+    "daysToPlan": 7,
+    "suggestionsPerDay": 2,
+    "knownVsUnknownBias": 0.5,
+    "priority": ["cheap", "quick", "delicious", "healthy"],
+    "shops": [],
+    "inspiration": "",
+    "recipeMode": "mix",
+}
 
 EDITED = {
     "daysToPlan": 5,
@@ -35,55 +41,86 @@ EDITED = {
 }
 
 
-def test_put_settings_accepts_settings_alone_without_name_or_email(client) -> None:
-    profile = _identify(client, "ada@example.com", "Ada")
-
-    resp = client.put(f"/api/profiles/{profile['id']}/settings", json=EDITED)
+def test_a_fresh_install_has_the_default_settings(client) -> None:
+    resp = client.get("/api/settings")
 
     assert resp.status_code == 200
-    updated = resp.json()
-    # Identity untouched — the settings save never carried name or email.
-    assert updated["id"] == profile["id"]
-    assert updated["email"] == "ada@example.com"
-    assert updated["name"] == "Ada"
-    assert updated["settings"] == EDITED
+    assert resp.json() == DEFAULTS
+
+
+def test_put_settings_saves_and_returns_them(client) -> None:
+    resp = client.put("/api/settings", json=EDITED)
+
+    assert resp.status_code == 200
+    assert resp.json() == EDITED
+    assert client.get("/api/settings").json() == EDITED
+
+
+def test_put_is_a_full_replace_so_omitted_fields_revert(client) -> None:
+    client.put("/api/settings", json=EDITED)
+
+    resp = client.put("/api/settings", json={"daysToPlan": 3})
+
+    assert resp.json() == {**DEFAULTS, "daysToPlan": 3}
+    assert client.get("/api/settings").json() == {**DEFAULTS, "daysToPlan": 3}
 
 
 def test_saved_settings_persist_and_reload(make_client, data_dir: Path) -> None:
     first = make_client(data_dir)
-    profile = _identify(first, "ada@example.com", "Ada")
-    first.put(f"/api/profiles/{profile['id']}/settings", json=EDITED)
+    first.put("/api/settings", json=EDITED)
 
     # A fresh app against the same data/ reads the settings back from disk.
     second = make_client(data_dir)
-    reloaded = second.get(f"/api/profiles/{profile['id']}").json()
-    assert reloaded["settings"] == EDITED
+    assert second.get("/api/settings").json() == EDITED
 
 
 def test_saved_priority_order_is_the_chosen_sequence(client) -> None:
-    profile = _identify(client, "ada@example.com", "Ada")
     order = ["delicious", "cheap", "healthy", "quick"]
-    resp = client.put(
-        f"/api/profiles/{profile['id']}/settings",
-        json={**EDITED, "priority": order},
-    )
-    assert resp.json()["settings"]["priority"] == order
+    resp = client.put("/api/settings", json={**EDITED, "priority": order})
+    assert resp.json()["priority"] == order
 
 
-def test_saving_one_profile_leaves_another_untouched(client) -> None:
-    ada = _identify(client, "ada@example.com", "Ada")
-    grace = _identify(client, "grace@example.com", "Grace")
-    grace_settings = grace["settings"]
+def _write_legacy_profiles(data_dir: Path, settings: dict) -> str:
+    profiles = [
+        {"id": "p1", "email": "ada@example.com", "name": "Ada", "settings": settings},
+        {
+            "id": "p2", "email": "bob@example.com", "name": "Bob",
+            "settings": {**DEFAULTS, "inspiration": "Bob's wishes"},
+        },
+    ]
+    text = json.dumps(profiles)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "profiles.json").write_text(text, "utf-8")
+    return text
 
-    client.put(f"/api/profiles/{ada['id']}/settings", json=EDITED)
 
-    # Grace's settings are still the defaults — Ada's save touched only Ada.
-    refetched = client.get(f"/api/profiles/{grace['id']}").json()
-    assert refetched["settings"] == grace_settings
-    assert refetched["settings"] != EDITED
+def test_legacy_profile_settings_are_adopted_once(make_client, data_dir: Path) -> None:
+    legacy = _write_legacy_profiles(data_dir, EDITED)
+
+    client = make_client(data_dir)
+
+    # The first profile's settings become the household's...
+    assert client.get("/api/settings").json() == EDITED
+    # ...and the legacy file is left exactly as it was.
+    assert (data_dir / "profiles.json").read_text("utf-8") == legacy
 
 
-def test_put_settings_unknown_profile_is_a_stock_404(client) -> None:
-    resp = client.put("/api/profiles/deadbeef/settings", json=EDITED)
-    assert resp.status_code == 404
-    assert resp.json() == {"detail": "Profile not found"}
+def test_existing_settings_are_not_overwritten_by_legacy_profiles(
+    make_client, data_dir: Path
+) -> None:
+    first = make_client(data_dir)
+    first.put("/api/settings", json={**DEFAULTS, "daysToPlan": 3})
+    _write_legacy_profiles(data_dir, EDITED)
+
+    second = make_client(data_dir)
+
+    assert second.get("/api/settings").json() == {**DEFAULTS, "daysToPlan": 3}
+
+
+def test_an_unreadable_legacy_profiles_file_is_ignored(make_client, data_dir: Path) -> None:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "profiles.json").write_text("{not json", "utf-8")
+
+    client = make_client(data_dir)
+
+    assert client.get("/api/settings").json()["recipeMode"] == "mix"  # defaults

@@ -16,9 +16,11 @@ export function RecipeThumb({ recipe }: { recipe: SuggestionRecipe }) {
       target="_blank"
       rel="noreferrer"
       onClick={stop}
-      aria-label={`${recipe.title} (åbner opskriften)`}
+      aria-label={`${recipe.title} (opens the recipe)`}
+      title="Open the recipe"
     >
       <img src={recipe.thumbnail} alt="" loading="lazy" />
+      <span className="recipe-link-hint">Open recipe ↗</span>
     </a>
   );
 }

@@ -75,14 +75,11 @@ def _plan(client, fake_openai, fake_tjek, offers, *suggestions) -> dict[str, Any
     fake_tjek.dealers = [{"id": "n1", "name": "Netto"}]
     fake_tjek.offers = {"n1": offers}
     fake_openai.canned = {"days": [{"day": 1, "suggestions": list(suggestions)}]}
-    profile_id = client.post(
-        "/api/profiles/identify", json={"email": "ada@ex.com", "name": "Ada"}
-    ).json()["id"]
     client.put(
-        f"/api/profiles/{profile_id}/settings",
+        "/api/settings",
         json={"daysToPlan": 1, "suggestionsPerDay": len(suggestions), "shops": ["netto"]},
     )
-    return client.post("/api/planning-runs", json={"profileId": profile_id}).json()
+    return client.post("/api/planning-runs", json={}).json()
 
 
 def _offers_by_ingredient(suggestion: dict[str, Any]) -> dict[str, tuple[str, str]]:
@@ -173,3 +170,63 @@ def test_a_bracketed_ref_from_the_model_is_still_understood(
     assert _offers_by_ingredient(run["days"][0]["suggestions"][0]) == {
         "agurk": ("Agurk", "model")
     }
+
+
+# --- Offers carry their shop's settings slug -------------------------------
+# A dish only shows offers from shops selected in settings (filtered in the
+# frontend), so every stored offer names its shop the way settings do.
+
+
+@pytest.mark.parametrize(
+    ("dealer", "slug"),
+    [
+        ("Netto", "netto"),
+        ("365discount", "coop-365"),  # Coop 365's Tjek dealer has another name
+        ("REMA 1000", "rema-1000"),
+        ("Føtex", "ftex"),
+        ("Bilka ToGo", "bilka"),
+        ("Kvickly", None),  # not a chain the app knows
+        (None, None),
+    ],
+)
+def test_shop_slug_maps_a_dealer_to_its_settings_slug(dealer, slug) -> None:
+    from food_planer.discounts import shop_slug
+
+    assert shop_slug(dealer) == slug
+
+
+def test_offers_on_dishes_carry_their_shop_slug(client, fake_openai, fake_tjek) -> None:
+    run = _plan(
+        client, fake_openai, fake_tjek, [_raw_offer("t-1", "Agurk")],
+        _suggestion("Salat", "agurk"),
+    )
+
+    (discount,) = run["days"][0]["suggestions"][0]["discounts"]
+    assert discount["shop"] == "Netto"
+    assert discount["shopSlug"] == "netto"
+    assert client.get(f"/api/planning-runs/{run['id']}").json()["days"][0]["suggestions"][0][
+        "discounts"
+    ][0]["shopSlug"] == "netto"
+
+
+def test_an_old_run_gets_shop_slugs_when_read(make_client, data_dir) -> None:
+    import json
+
+    run = {
+        "id": "old", "createdAt": "2026-10-01T18:00:00+00:00",
+        "status": "success", "dayCount": 1, "dishIds": [],
+        "fridgeSnippet": "", "requestedDays": None, "requestedSuggestionsPerDay": None,
+        "offerCount": 1, "offersUnavailable": [], "error": None,
+        "days": [{"day": 1, "suggestions": [{
+            "title": "Salat", "description": "", "ingredients": [], "estimatedCost": 40,
+            "prepTimeMinutes": 10, "sourceDish": None,
+            # Stored before offers carried a shopSlug.
+            "discounts": [{"offerId": "x", "productName": "Agurk", "shop": "365discount"}],
+        }]}],
+    }
+    data_dir.mkdir(parents=True)
+    (data_dir / "planning_runs.json").write_text(json.dumps([run]), "utf-8")
+
+    body = make_client(data_dir).get("/api/planning-runs/old").json()
+
+    assert body["days"][0]["suggestions"][0]["discounts"][0]["shopSlug"] == "coop-365"

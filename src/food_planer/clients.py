@@ -71,6 +71,10 @@ class TjekClient(Protocol):
 
     async def list_offers(self, *, dealer_id: str) -> list[dict[str, Any]]: ...
 
+    async def fetch_image(self, url: str) -> tuple[bytes, str]:
+        """An image Tjek links to (a dealer's logo): its bytes and media type."""
+        ...
+
 
 class RealOpenAIClient:
     """The hardcoded OpenAI planner (issue #23).
@@ -224,6 +228,14 @@ class RealTjekClient:
         async with self._client() as client:
             return await self._list(client, "/dealers", {})
 
+    async def fetch_image(self, url: str) -> tuple[bytes, str]:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            return resp.content, resp.headers.get("content-type", "")
+
     async def list_offers(self, *, dealer_id: str) -> list[dict[str, Any]]:
         async with self._client() as client:
             catalogs = await self._list(client, "/catalogs", {"dealer_ids": dealer_id})
@@ -322,9 +334,12 @@ class FakeTjekClient:
     offers: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     # Set to make every call raise, as a Tjek outage would.
     fail: bool = False
+    # Images by URL, as ``(bytes, media type)``; any other URL fails.
+    images: dict[str, tuple[bytes, str]] = field(default_factory=dict)
     # Call counts, so caching is assertable through the seam.
     dealer_calls: int = 0
     offer_calls: int = 0
+    image_calls: int = 0
 
     async def list_dealers(self) -> list[dict[str, Any]]:
         self.dealer_calls += 1
@@ -340,3 +355,10 @@ class FakeTjekClient:
         if self.fail:
             raise ConnectionError("Tjek is unreachable")
         return list(self.offers.get(dealer_id, []))
+
+    async def fetch_image(self, url: str) -> tuple[bytes, str]:
+        self.image_calls += 1
+        await asyncio.sleep(0)
+        if self.fail or url not in self.images:
+            raise ConnectionError(f"no image at {url}")
+        return self.images[url]
