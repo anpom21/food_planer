@@ -110,7 +110,7 @@ def _store_recipes(data_dir: Path, recipes: list[dict[str, Any]]) -> None:
     write_json_atomic(data_dir / "recipes" / "test.json", {"recipes": recipes})
 
 
-def _setup(client, fake_tjek, data_dir: Path) -> str:
+def _setup(client, fake_tjek, data_dir: Path) -> None:
     _store_recipes(
         data_dir,
         [
@@ -141,23 +141,19 @@ def _setup(client, fake_tjek, data_dir: Path) -> str:
             }
         ]
     }
-    profile_id = client.post(
-        "/api/profiles/identify", json={"email": "ada@ex.com", "name": "Ada"}
-    ).json()["id"]
     client.put(
-        f"/api/profiles/{profile_id}/settings",
+        "/api/settings",
         json={"daysToPlan": 1, "suggestionsPerDay": 1, "shops": ["netto"]},
     )
-    return profile_id
 
 
 def test_the_prompt_lists_only_matching_dinner_recipes(
     client, fake_openai, fake_tjek, data_dir: Path
 ) -> None:
-    profile_id = _setup(client, fake_tjek, data_dir)
+    _setup(client, fake_tjek, data_dir)
     fake_openai.canned = {"days": []}
 
-    client.post("/api/planning-runs", json={"profileId": profile_id})
+    client.post("/api/planning-runs", json={})
 
     prompt = fake_openai.prompts[-1]
     # Refs follow the ranking; an offer in the prompt's list carries its [id].
@@ -168,9 +164,9 @@ def test_the_prompt_lists_only_matching_dinner_recipes(
 
 
 def test_matches_endpoint_explains_each_recipe(client, fake_tjek, data_dir: Path) -> None:
-    profile_id = _setup(client, fake_tjek, data_dir)
+    _setup(client, fake_tjek, data_dir)
 
-    matches = client.get("/api/recipes/matches", params={"profileId": profile_id}).json()
+    matches = client.get("/api/recipes/matches").json()
 
     by_title = {m["title"]: m for m in matches}
     assert set(by_title) == {"Porresuppe", "Chili con carne"}
@@ -182,7 +178,6 @@ def test_matches_endpoint_explains_each_recipe(client, fake_tjek, data_dir: Path
         }
     ]
     assert all(m["inPrompt"] for m in matches)
-    assert client.get("/api/recipes/matches", params={"profileId": "nobody"}).status_code == 404
 
 
 # --- Linking a Suggestion back to its recipe -------------------------------
@@ -222,7 +217,7 @@ def _suggestion(title: str, source_recipe: str | None, *ingredients: str) -> dic
 def test_a_recipe_dish_is_the_recipe_1_to_1(
     client, fake_openai, fake_tjek, data_dir: Path
 ) -> None:
-    profile_id = _setup(client, fake_tjek, data_dir)
+    _setup(client, fake_tjek, data_dir)
     soup = _recipe("Porresuppe", "500 g porre, i ringe", "500 g hakket oksekød")
     soup.update(thumbnail="https://r.test/porre.jpg", total_time="1 time 10 min.",
                 work_time="20 min.", servings="4 pers.",
@@ -242,7 +237,7 @@ def test_a_recipe_dish_is_the_recipe_1_to_1(
         ]
     }
 
-    run = client.post("/api/planning-runs", json={"profileId": profile_id}).json()
+    run = client.post("/api/planning-runs", json={}).json()
 
     linked, invented = run["days"][0]["suggestions"]
     assert linked["recipe"] == {
@@ -260,8 +255,8 @@ def test_a_recipe_dish_is_the_recipe_1_to_1(
     # The recipe's lines, parsed into shopping items and marked; the minced
     # beef is on offer (matched by name against the recipe, not the model).
     assert linked["ingredients"] == [
-        {"name": "porre", "quantity": "500 g", "have": "fresh"},
-        {"name": "hakket oksekød", "quantity": "500 g", "have": None},
+        {"name": "porre", "quantity": "500 g", "have": "fresh", "group": None},
+        {"name": "hakket oksekød", "quantity": "500 g", "have": None, "group": None},
     ]
     assert [(d["matchedIngredient"], d["matchedBy"]) for d in linked["discounts"]] == [
         ("hakket oksekød", "name")
@@ -279,12 +274,12 @@ def test_a_recipe_dish_is_the_recipe_1_to_1(
 def test_ingredients_we_have_are_marked_fresh_or_staple(
     client, fake_openai, fake_tjek, data_dir: Path
 ) -> None:
-    profile_id = _setup(client, fake_tjek, data_dir)  # Leek fresh, Onions staple
+    _setup(client, fake_tjek, data_dir)  # Leek fresh, Onions staple
     fake_openai.canned = {
         "days": [{"day": 1, "suggestions": [_suggestion("Suppe", None, "porrer", "rødløg", "fløde")]}]
     }
 
-    run = client.post("/api/planning-runs", json={"profileId": profile_id}).json()
+    run = client.post("/api/planning-runs", json={}).json()
 
     haves = {i["name"]: i["have"] for i in run["days"][0]["suggestions"][0]["ingredients"]}
     assert haves == {"porrer": "fresh", "rødløg": "staple", "fløde": None}
@@ -296,18 +291,22 @@ def test_ingredients_we_have_are_marked_fresh_or_staple(
 def test_uncertain_recipe_offers_are_marked_for_the_planner_to_check(
     client, fake_openai, fake_tjek, data_dir: Path
 ) -> None:
-    profile_id = _setup(client, fake_tjek, data_dir)
+    _setup(client, fake_tjek, data_dir)
     _store_recipes(data_dir, [_recipe("Burger", "4 burgerboller")])
     fake_tjek.offers["n1"][0]["heading"] = "Salling Princip briocheburgerboller"
     fake_openai.canned = {"days": []}
 
-    client.post("/api/planning-runs", json={"profileId": profile_id})
+    client.post("/api/planning-runs", json={})
 
     prompt = fake_openai.prompts[-1]
     assert '[r1] Burger — check offer: burgerboller ≈ "Salling Princip briocheburgerboller"' in prompt
     assert '"check offer" marks a product that may not be the ingredient' in prompt
-    matches = client.get("/api/recipes/matches", params={"profileId": profile_id}).json()
+    matches = client.get("/api/recipes/matches").json()
     assert matches[0]["offers"][0]["review"] is True
+    # …but a card never tags a guess as on offer: it would ride on to the
+    # shopping list unchecked.
+    assert matches[0]["discounts"] == []
+    assert matches[0]["counts"]["offers"] == 0
 
 
 # --- Online-recipe modes, cards ----------------------------------------------
@@ -330,9 +329,9 @@ def test_a_recipe_line_parses_into_a_shopping_item(line: str, item: dict[str, st
     assert parse_ingredient_line(line) == item
 
 
-def _set_mode(client, profile_id: str, mode: str, days: int = 1, per_day: int = 1) -> None:
+def _set_mode(client, mode: str, days: int = 1, per_day: int = 1) -> None:
     client.put(
-        f"/api/profiles/{profile_id}/settings",
+        "/api/settings",
         json={"daysToPlan": days, "suggestionsPerDay": per_day, "shops": ["netto"], "recipeMode": mode},
     )
 
@@ -347,11 +346,11 @@ def _set_mode(client, profile_id: str, mode: str, days: int = 1, per_day: int = 
 def test_the_recipe_mode_sets_how_many_dishes_are_recipes(
     client, fake_openai, fake_tjek, data_dir: Path, mode: str, expected: str
 ) -> None:
-    profile_id = _setup(client, fake_tjek, data_dir)
-    _set_mode(client, profile_id, mode)
+    _setup(client, fake_tjek, data_dir)
+    _set_mode(client, mode)
     fake_openai.canned = {"days": []}
 
-    client.post("/api/planning-runs", json={"profileId": profile_id})
+    client.post("/api/planning-runs", json={})
 
     prompt = fake_openai.prompts[-1]
     assert expected in prompt
@@ -363,28 +362,28 @@ def test_the_recipe_mode_sets_how_many_dishes_are_recipes(
 def test_no_online_recipes_leaves_them_out_entirely(
     client, fake_openai, fake_tjek, data_dir: Path
 ) -> None:
-    profile_id = _setup(client, fake_tjek, data_dir)
-    _set_mode(client, profile_id, "none")
+    _setup(client, fake_tjek, data_dir)
+    _set_mode(client, "none")
     fake_openai.canned = {"days": []}
 
-    client.post("/api/planning-runs", json={"profileId": profile_id})
+    client.post("/api/planning-runs", json={})
 
     assert "Porresuppe" not in fake_openai.prompts[-1]
     assert "sourceRecipe" not in fake_openai.prompts[-1]
-    matches = client.get("/api/recipes/matches", params={"profileId": profile_id}).json()
+    matches = client.get("/api/recipes/matches").json()
     assert matches and not any(m["inPrompt"] for m in matches)
 
 
 def test_recipe_cards_count_what_we_have_and_whats_on_offer(
     client, fake_tjek, data_dir: Path
 ) -> None:
-    profile_id = _setup(client, fake_tjek, data_dir)  # Leek fresh, Onions staple
+    _setup(client, fake_tjek, data_dir)  # Leek fresh, Onions staple
     _store_recipes(
         data_dir,
         [_recipe("Chili", "2 porrer", "1 løg", "500 g hakket oksekød", "1 dåse bønner")],
     )
 
-    (card,) = client.get("/api/recipes", params={"profileId": profile_id}).json()
+    (card,) = client.get("/api/recipes").json()
 
     assert card["counts"] == {"fresh": 1, "staple": 1, "offers": 1}
     assert [i["have"] for i in card["ingredients"]] == ["fresh", "staple", None, None]
@@ -393,4 +392,3 @@ def test_recipe_cards_count_what_we_have_and_whats_on_offer(
     assert discount["productName"] == "Hakket oksekød 8-12%"
     # Rough price: the offer's 35 kr + 20 kr for the beans; what we have is free.
     assert card["estimatedCost"] == 55
-    assert client.get("/api/recipes", params={"profileId": "nobody"}).status_code == 404

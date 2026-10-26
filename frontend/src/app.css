@@ -1539,27 +1539,6 @@ body {
   font-size: 12.5px;
 }
 
-/* Plan tab: the Profile's planning settings, folded under the plan bar. */
-.plan-settings {
-  margin: 12px 0 4px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel);
-}
-.plan-settings > summary {
-  cursor: pointer;
-  padding: 10px 14px;
-  font-weight: 600;
-  font-size: 14px;
-}
-.plan-settings[open] > summary {
-  border-bottom: 1px solid var(--line);
-}
-.plan-settings > .settings {
-  padding: 4px 14px 14px;
-  max-width: none;
-}
-
 /* Online-recipes mode: three pills, one on. */
 .mode-pills {
   display: flex;
@@ -1592,4 +1571,17 @@ body {
   background: #f3eefa;
   color: #5b3f8a;
   border-color: #e0d6f0;
+}
+
+/* An ingredient sub-list's heading ("Til servering"), in Details and the review. */
+.ing-subhead {
+  margin: 10px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+.ing-group .ing-subhead {
+  margin: 8px 10px 2px;
 }

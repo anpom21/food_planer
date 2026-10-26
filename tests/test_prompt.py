@@ -6,20 +6,11 @@
   sends it, with each ``{{variable}}`` filled from the library and settings;
 - a template naming an unknown variable is refused with a 422;
 - ``template: null`` (or the default text verbatim) resets to the default;
-- ``POST /api/prompt/preview`` renders a draft for a Profile, marking which
-  pieces were injected, without saving or calling the model.
+- ``POST /api/prompt/preview`` renders a draft with the household's settings,
+  marking which pieces were injected, without saving or calling the model.
 """
 
 from __future__ import annotations
-
-from fastapi.testclient import TestClient
-
-
-def _make_profile(client: TestClient) -> str:
-    resp = client.post(
-        "/api/profiles/identify", json={"email": "ada@ex.com", "name": "Ada"}
-    )
-    return resp.json()["id"]
 
 
 def test_prompt_starts_as_the_default_with_its_variables(client) -> None:
@@ -35,10 +26,9 @@ def test_prompt_starts_as_the_default_with_its_variables(client) -> None:
 
 def test_saved_template_drives_the_next_run(client, fake_openai) -> None:
     fake_openai.canned = {"days": []}
-    profile_id = _make_profile(client)
     client.post("/api/dishes", json={"title": "Frikadeller"})
     client.put(
-        f"/api/profiles/{profile_id}/settings",
+        "/api/settings",
         json={"daysToPlan": 3, "inspiration": "more fish"},
     )
 
@@ -49,7 +39,7 @@ def test_saved_template_drives_the_next_run(client, fake_openai) -> None:
     assert resp.status_code == 200
     assert resp.json()["isDefault"] is False
 
-    client.post("/api/planning-runs", json={"profileId": profile_id})
+    client.post("/api/planning-runs", json={})
 
     prompt = fake_openai.prompts[-1]
     assert prompt.startswith("Plan 3 days. Wishes: more fish.\n")
@@ -77,24 +67,19 @@ def test_null_or_default_text_resets_to_the_default(client) -> None:
 
 def test_line_holding_only_an_empty_variable_is_dropped(client, fake_openai) -> None:
     fake_openai.canned = {"days": []}
-    profile_id = _make_profile(client)  # no Inspiration set
+    # No Inspiration set: the household settings are the defaults.
     client.put(
         "/api/prompt",
         json={"template": "Start.\n\n{{inspiration_instruction}}\n\nEnd."},
     )
 
-    client.post("/api/planning-runs", json={"profileId": profile_id})
+    client.post("/api/planning-runs", json={})
 
     assert fake_openai.prompts[-1] == "Start.\n\nEnd."
 
 
 def test_preview_marks_injected_values_without_saving(client, fake_openai) -> None:
-    profile_id = _make_profile(client)
-
-    resp = client.post(
-        "/api/prompt/preview",
-        json={"profileId": profile_id, "template": "Plan {{days}} days."},
-    )
+    resp = client.post("/api/prompt/preview", json={"template": "Plan {{days}} days."})
 
     assert resp.status_code == 200
     assert resp.json()["segments"] == [
@@ -106,16 +91,10 @@ def test_preview_marks_injected_values_without_saving(client, fake_openai) -> No
     assert fake_openai.calls == 0
 
 
-def test_preview_refuses_unknown_variables_and_unknown_profiles(client) -> None:
-    profile_id = _make_profile(client)
-
-    bad = client.post(
-        "/api/prompt/preview", json={"profileId": profile_id, "template": "{{nope}}"}
-    )
-    missing = client.post("/api/prompt/preview", json={"profileId": "nobody"})
+def test_preview_refuses_unknown_variables(client) -> None:
+    bad = client.post("/api/prompt/preview", json={"template": "{{nope}}"})
 
     assert bad.status_code == 422
-    assert missing.status_code == 404
 
 
 def test_saved_prompt_survives_a_restart(make_client, data_dir) -> None:

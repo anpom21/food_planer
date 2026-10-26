@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Discount, SuggestionIngredient } from "./api";
+import type { Discount, PlanningRun, Suggestion, SuggestionIngredient } from "./api";
 
 // The 🏷️ marker on an ingredient that's on offer this week. Hovering, focusing
 // or tapping it opens a card with the exact offer the plan drew on — the
@@ -33,6 +33,30 @@ export function offerFor(
       return name.includes(m) || m.includes(name);
     })
   );
+}
+
+// A dish only shows offers from shops currently selected in settings — an
+// archived plan, or one a partner made with other shops, keeps its offers on
+// disk but hides those from shops you've since deselected.
+export function atSelectedShops<T extends { discounts: Discount[] }>(
+  dish: T,
+  shops: string[],
+): T {
+  const selected = new Set(shops);
+  return {
+    ...dish,
+    discounts: dish.discounts.filter((d) => d.shopSlug != null && selected.has(d.shopSlug)),
+  };
+}
+
+export function runAtSelectedShops(run: PlanningRun, shops: string[]): PlanningRun {
+  return {
+    ...run,
+    days: run.days.map((day) => ({
+      ...day,
+      suggestions: day.suggestions.map((s: Suggestion) => atSelectedShops(s, shops)),
+    })),
+  };
 }
 
 export function OfferCard({ offer }: { offer: Discount }) {

@@ -4,16 +4,20 @@ This is the fiddliest logic in the app, so it lives in Python as a pure
 function with unit tests behind the HTTP seam, rather than a ``useMemo``
 debuggable only in a browser (spec.md → "Merging lives in Python, not React").
 
-A *line* is one stored contribution — ``{id, name, quantity, source}``, where
-``quantity`` is free text ("800 g", "2 cups", "1 pinch", "2") and ``source`` is
-``{suggestionTitle, kind}`` for a dish-sourced line or ``None`` for a
-hand-typed one. :func:`merge_shopping_list` folds the lines into one row per
-ingredient:
+A *line* is one stored contribution — ``{id, name, quantity, source, offer}``,
+where ``quantity`` is free text ("800 g", "2 cups", "1 pinch", "2"), ``source``
+is ``{suggestionTitle, kind}`` for a dish-sourced line or ``None`` for a
+hand-typed one, and ``offer`` is the tilbudsavis offer the ingredient was on
+(``{shop, shopSlug, productName, price}``) or ``None``.
+:func:`merge_shopping_list` folds the lines into one row per ingredient:
 
 - the headline ``totalQuantity`` is the sum across every dish that wants it;
 - each dish's ``share`` is preserved on its source entry;
 - where two dishes ask in units that don't match, the amounts are *joined*
-  rather than silently summed ("5 dl and 2 cups"), each keeping its own unit.
+  rather than silently summed ("5 dl and 2 cups"), each keeping its own unit;
+- the offers behind the row are kept, and the rows are grouped by shop — each
+  shop's offers together, in the catalog's shop order, everything else last —
+  so the list (and every export of it) reads like a route through the shops.
 
 Quantities are deliberately never split into number + unit on the way in
 (spec.md → non-goals); the split happens here, at merge time, and what can't be
@@ -26,6 +30,11 @@ import csv
 import io
 import re
 from typing import Any
+
+from .shops import DANISH_CHAINS, slugify
+
+# The catalog's shop order, which the shop groups follow.
+_SHOP_ORDER = {slugify(name): i for i, name in enumerate(DANISH_CHAINS)}
 
 # A leading (optionally signed/decimal) number, then whatever unit trails it.
 _NUMBER_RE = re.compile(r"^\s*([+-]?(?:\d+\.?\d*|\.\d+))\s*(.*)$", re.DOTALL)
@@ -110,13 +119,38 @@ def _build_row(name: str, lines: list[dict[str, Any]]) -> dict[str, Any]:
         if line.get("source") is None and (line.get("note") or "").strip()
     ]
 
+    # The offers behind the row, once each — usually one; two dishes may have
+    # found the same ingredient on offer at different shops.
+    offers: list[dict[str, Any]] = []
+    for line in lines:
+        offer = line.get("offer")
+        if offer and all(
+            (o["shop"], o["productName"]) != (offer["shop"], offer["productName"])
+            for o in offers
+        ):
+            offers.append(offer)
+
     return {
         "name": name,
         "totalQuantity": _join_total(parsed),
         "sources": sources,
         "lineIds": line_ids,
         "note": "; ".join(notes),
+        "offers": offers,
     }
+
+
+def shop_of(row: dict[str, Any]) -> dict[str, Any] | None:
+    """The shop a row is grouped under: its first offer's, or ``None``."""
+    offers = row.get("offers") or []
+    return offers[0] if offers else None
+
+
+def _shop_rank(row: dict[str, Any]) -> tuple[int, str]:
+    offer = shop_of(row)
+    if offer is None:
+        return (len(_SHOP_ORDER) + 1, "")
+    return (_SHOP_ORDER.get(offer.get("shopSlug") or "", len(_SHOP_ORDER)), offer["shop"])
 
 
 def merge_shopping_list(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -136,7 +170,9 @@ def merge_shopping_list(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             order.append(key)
         groups[key]["lines"].append(line)
 
-    return [_build_row(groups[key]["name"], groups[key]["lines"]) for key in order]
+    rows = [_build_row(groups[key]["name"], groups[key]["lines"]) for key in order]
+    # Stable, so the order items were added in survives within each shop.
+    return sorted(rows, key=_shop_rank)
 
 
 # --- Export: the two ways the list leaves the app (issue #30) ---------------
@@ -157,15 +193,48 @@ def _dish_sources(row: dict[str, Any]) -> list[dict[str, Any]]:
     return [s for s in row["sources"] if s.get("dishTitle")]
 
 
+def _kr(price: float) -> str:
+    """A price the Danish way: ``35.0`` → "35 kr", ``12.95`` → "12,95 kr"."""
+    return f"{price:.2f}".rstrip("0").rstrip(".").replace(".", ",") + " kr"
+
+
+# Chain names by slug, for offers whose Tjek dealer is named differently
+# ("365discount" is Coop 365).
+_CHAIN_NAMES = {slugify(name): name for name in DANISH_CHAINS}
+
+
+def shop_name(offer: dict[str, Any]) -> str:
+    """The shop an offer is from, by its chain name where it's a known chain."""
+    return _CHAIN_NAMES.get(offer.get("shopSlug") or "", offer["shop"])
+
+
+def offer_label(offer: dict[str, Any]) -> str:
+    """One offer in words: "Netto: Hakket oksekød 8-12% (35 kr)"."""
+    label = f"{shop_name(offer)}: {offer['productName']}"
+    if offer.get("price") is not None:
+        label += f" ({_kr(offer['price'])})"
+    return label
+
+
 def shopping_list_text(rows: list[dict[str, Any]]) -> str:
     """Render merged rows as the plain text pasted into a messaging app.
 
     Each outstanding row shows its summed total; a row wanted by more than one
     dish also spells out each dish's share in brackets, since the headline
-    amount alone hides where the total came from.
+    amount alone hides where the total came from. When anything is on offer,
+    the rows come under a heading per shop (the offer's product and price on
+    its line), and whatever isn't on offer under "Other".
     """
-    lines = [_TEXT_HEADER, ""]
+    lines = [_TEXT_HEADER]
+    grouped = any(shop_of(row) for row in rows)
+    heading = None
+    if not grouped:
+        lines.append("")
     for row in rows:
+        offer = shop_of(row)
+        if grouped and (shop_name(offer) if offer else "Other") != heading:
+            heading = shop_name(offer) if offer else "Other"
+            lines += ["", heading]
         dishes = _dish_sources(row)
         total = (row.get("totalQuantity") or "").strip()
         line = f"[ ] {row['name']}"
@@ -174,6 +243,9 @@ def shopping_list_text(rows: list[dict[str, Any]]) -> str:
         if len(dishes) > 1:
             shares = ", ".join(f"{s['dishTitle']} {s['share']}" for s in dishes)
             line += f" ({shares})"
+        if offer:
+            price = f", {_kr(offer['price'])}" if offer.get("price") is not None else ""
+            line += f" · tilbud: {offer['productName']}{price}"
         lines.append(line)
     return "\n".join(lines) + "\n"
 
@@ -193,8 +265,34 @@ def _notes_for(row: dict[str, Any]) -> str:
     return (row.get("note") or "").strip()
 
 
+def shopping_list_reminders(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Merged rows as reminders for the iPhone's Påmindelser (Reminders) app:
+    one ``{title, notes}`` per row, handed to an iOS Shortcut that adds them.
+
+    The title is the ingredient, capitalised as a list item; the notes are the
+    total and where it's for, so the subtext under each reminder reads
+    "1000 g · Chili con carne 500 g; Lasagne 500 g".
+    """
+    reminders = []
+    for row in rows:
+        name = row["name"].strip()
+        offer = shop_of(row)
+        details = [
+            offer_label(offer) if offer else "",
+            (row.get("totalQuantity") or "").strip(),
+            _notes_for(row),
+        ]
+        reminders.append(
+            {
+                "title": name[:1].upper() + name[1:],
+                "notes": " · ".join(d for d in details if d),
+            }
+        )
+    return reminders
+
+
 def shopping_list_csv(rows: list[dict[str, Any]]) -> str:
-    """Render merged rows as CSV — ``Ingredient, Quantity, Notes``.
+    """Render merged rows as CSV — ``Ingredient, Quantity, Notes, Shop, Offer``.
 
     One row per outstanding ingredient, standard RFC-4180 quoting (the ``csv``
     module handles commas and quotes), prefixed with a UTF-8 BOM so Excel reads
@@ -202,9 +300,16 @@ def shopping_list_csv(rows: list[dict[str, Any]]) -> str:
     """
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(["Ingredient", "Quantity", "Notes"])
+    writer.writerow(["Ingredient", "Quantity", "Notes", "Shop", "Offer"])
     for row in rows:
+        offer = shop_of(row)
         writer.writerow(
-            [row["name"], (row.get("totalQuantity") or "").strip(), _notes_for(row)]
+            [
+                row["name"],
+                (row.get("totalQuantity") or "").strip(),
+                _notes_for(row),
+                shop_name(offer) if offer else "",
+                offer_label(offer).split(": ", 1)[1] if offer else "",
+            ]
         )
     return _UTF8_BOM + buffer.getvalue()

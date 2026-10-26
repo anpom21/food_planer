@@ -3,14 +3,14 @@ import {
   getShopOffers,
   listShops,
   type Offer,
-  type Profile,
   type Shop,
   type ShopOffers,
 } from "./api";
+import { useHousehold } from "./household";
 import { ShopMark } from "./SettingsScreen";
 
 // The tilbudsavis: this week's offers for one chain, straight from
-// eTilbudsavis (Tjek). The Profile's preferred shops lead the picker and the
+// eTilbudsavis (Tjek), opened from the shopping list. Your shops lead the picker and the
 // first of them is opened by default; any other chain is one tap away. The
 // backend caches each chain's offers for a day, so browsing is cheap.
 
@@ -77,7 +77,8 @@ function OfferCard({ offer }: { offer: Offer }) {
   );
 }
 
-export function Offers({ profile }: { profile: Profile }) {
+export function Offers() {
+  const { settings } = useHousehold();
   const [catalog, setCatalog] = useState<Shop[] | null>(null);
   const [slug, setSlug] = useState<string | null>(null);
   const [result, setResult] = useState<ShopOffers | null>(null);
@@ -86,7 +87,7 @@ export function Offers({ profile }: { profile: Profile }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("paper");
 
-  const preferred = new Set(profile.settings.shops);
+  const preferred = new Set(settings.shops);
 
   useEffect(() => {
     listShops()
@@ -96,7 +97,7 @@ export function Offers({ profile }: { profile: Profile }) {
         setSlug(first?.slug ?? null);
       })
       .catch((e: unknown) => setError(String(e)));
-    // Seed once per Profile (the screen is keyed by profile id).
+    // Seed once, when the sheet opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -127,14 +128,9 @@ export function Offers({ profile }: { profile: Profile }) {
 
   return (
     <section className="offers">
-      <header className="toolbar">
-        <div>
-          <h1>Tilbudsavis</h1>
-          <p className="muted">
-            This week's offers from eTilbudsavis. Your preferred shops come first.
-          </p>
-        </div>
-      </header>
+      <p className="muted">
+        This week's offers from eTilbudsavis. Your shops come first.
+      </p>
 
       <div className="pill-grid">
         {ordered.map((shop) => (

@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import { foodEmoji } from "./foodEmoji";
+import { shopColor, shopName } from "./shopColors";
+import { useHousehold } from "./household";
+import { markShortcutReady, RemindersSetup, runShortcut, shortcutReady } from "./Reminders";
+import { Sheet } from "./Sheet";
 import {
   SHOPPING_LIST_CSV_URL,
   getShoppingList,
   getShoppingListText,
+  exportReminders,
   removeShoppingRows,
   type ShoppingRow,
 } from "./api";
@@ -75,13 +81,22 @@ function CopyModal({
   );
 }
 
+// Which shop group a row is under: its first offer's shop, or none.
+const groupKey = (row: ShoppingRow) => {
+  const offer = row.offers[0];
+  return offer ? offer.shopSlug ?? offer.shop : "";
+};
+
+const kr = (price: number) => `${price.toFixed(2).replace(/\.?0+$/, "").replace(".", ",")} kr`;
+
 export function ShoppingList() {
+  const { go, notify, openOffers, refreshCounts } = useHousehold();
   const [rows, setRows] = useState<ShoppingRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copyText, setCopyText] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
   // Rows ticked for "Clear selected", keyed by their line ids.
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [remindersSetup, setRemindersSetup] = useState(false);
 
   useEffect(() => {
     getShoppingList()
@@ -89,10 +104,7 @@ export function ShoppingList() {
       .catch((e: unknown) => setError(String(e)));
   }, []);
 
-  function flash(message: string) {
-    setToast(message);
-    setTimeout(() => setToast(null), 2600);
-  }
+  const flash = (message: string) => notify(message);
 
   const rowKey = (row: ShoppingRow) => row.lineIds.join(",");
 
@@ -112,7 +124,22 @@ export function ShoppingList() {
     try {
       setRows(await removeShoppingRows(toClear));
       setPicked(new Set());
+      refreshCounts();
       flash(label);
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  }
+
+  // Send the ticked rows (or the whole list) to Påmindelser via the shortcut,
+  // then offer to clear them here, since they now live on the phone.
+  async function sendToReminders(toSend: ShoppingRow[], all: boolean) {
+    try {
+      runShortcut(await exportReminders(all ? undefined : toSend));
+      notify(`${toSend.length} ${toSend.length === 1 ? "item" : "items"} sent to Påmindelser`, {
+        label: "Clear them here",
+        run: () => void clearRows(toSend, "Cleared from the list"),
+      });
     } catch (e: unknown) {
       setError(String(e));
     }
@@ -144,22 +171,41 @@ export function ShoppingList() {
 
   const empty = rows.length === 0;
   const pickedRows = rows.filter((row) => picked.has(rowKey(row)));
+  // Shop headings only when something on the list came from an offer.
+  const grouped = rows.some((row) => row.offers.length > 0);
 
   return (
-    <section className="library shopping">
-      <header className="toolbar">
+    <section className="page shopping">
+      <header className="page-head">
         <div>
           <h1>Shopping list</h1>
-          <p className="muted">Shared by the whole household.</p>
+          <p className="muted">
+            {empty ? "Nothing to buy yet." : `${rows.length} ${rows.length === 1 ? "item" : "items"} to buy.`}
+          </p>
         </div>
-        <div style={{ display: "flex", gap: "0.5rem" }}>
+        <div className="head-actions">
+          <button className="btn" onClick={openOffers}>
+            🏷️ Tilbudsavis
+          </button>
+          <button
+            className="btn"
+            disabled={empty}
+            title="Send to the iPhone's Påmindelser — the ticked rows, or the whole list"
+            onClick={() => {
+              const all = pickedRows.length === 0;
+              if (shortcutReady()) void sendToReminders(all ? rows : pickedRows, all);
+              else setRemindersSetup(true);
+            }}
+          >
+            ✅ Påmindelser{pickedRows.length > 0 ? ` (${pickedRows.length})` : ""}
+          </button>
           <button className="btn" disabled={empty} onClick={openCopy}>
             Copy list
           </button>
           {/* A plain anchor download: the CSV is served with a filename and a
               UTF-8 BOM, so no client-side blob juggling is needed. */}
           <a
-            className={`btn primary${empty ? " disabled" : ""}`}
+            className={`btn${empty ? " disabled" : ""}`}
             href={SHOPPING_LIST_CSV_URL}
             download="shopping-list.csv"
             aria-disabled={empty}
@@ -210,25 +256,60 @@ export function ShoppingList() {
       )}
 
       {empty ? (
-        <p className="muted">
-          Nothing on the list yet — add ingredients from a planned week.
-        </p>
+        <div className="empty-state stacked">
+          <p className="muted">
+            Add ingredients from a planned week or from any dish, and they land
+            here — merged, with which dish wants what.
+          </p>
+          <div className="head-actions">
+            <button className="btn primary" onClick={() => go("plan")}>
+              Plan a week
+            </button>
+            <button className="btn" onClick={() => go("dishes")}>
+              Browse dishes
+            </button>
+          </div>
+        </div>
       ) : (
         <ul className="shopping-rows">
-          {rows.map((row) => {
+          {rows.flatMap((row, index) => {
             const dishes = row.sources.filter((s) => s.dishTitle);
             const shared = dishes.length > 1;
-            return (
+            const offer = row.offers[0];
+            // Rows arrive grouped by shop: a heading starts each shop's run.
+            const key = groupKey(row);
+            const heading =
+              grouped && (index === 0 || groupKey(rows[index - 1]) !== key) ? (
+                <li className="shopping-group" key={`group:${key}`}>
+                  <span
+                    className="shop-square"
+                    style={{ background: offer ? shopColor(offer.shopSlug) : "transparent" }}
+                    aria-hidden="true"
+                  />
+                  <span className="shopping-group-name">
+                    {offer ? shopName(offer.shopSlug, offer.shop) : "Other items"}
+                  </span>
+                  <span className="muted">{rows.filter((r) => groupKey(r) === key).length}</span>
+                </li>
+              ) : null;
+            return [
+              heading,
+              // The whole row is the tap target on a phone, not just the box.
               <li
                 key={rowKey(row)}
                 className={`shopping-row${picked.has(rowKey(row)) ? " picked" : ""}`}
+                onClick={() => togglePick(row)}
               >
                 <input
                   type="checkbox"
                   aria-label={`Select ${row.name}`}
                   checked={picked.has(rowKey(row))}
+                  onClick={(e) => e.stopPropagation()}
                   onChange={() => togglePick(row)}
                 />
+                <span className="shopping-icon" aria-hidden="true">
+                  {foodEmoji(row.name) ?? "🛒"}
+                </span>
                 <span className="shopping-name">{row.name}</span>
                 {row.totalQuantity && (
                   <span className="shopping-total">{row.totalQuantity}</span>
@@ -243,11 +324,39 @@ export function ShoppingList() {
                   {dishes.length === 0 && row.note && (
                     <span className="chip">✎ {row.note}</span>
                   )}
+                  {row.offers.map((o) => (
+                    <span key={`${o.shop}:${o.productName}`} className="chip offer-chip">
+                      <span
+                        className="shop-square small"
+                        style={{ background: shopColor(o.shopSlug) }}
+                        aria-hidden="true"
+                      />
+                      {o.productName}
+                      {o.price != null ? ` · ${kr(o.price)}` : ""}
+                    </span>
+                  ))}
                 </span>
-              </li>
-            );
+              </li>,
+            ];
           })}
         </ul>
+      )}
+
+      {remindersSetup && (
+        <Sheet title="Send to Påmindelser" onClose={() => setRemindersSetup(false)}>
+          <RemindersSetup
+            onDone={() => {
+              markShortcutReady();
+              setRemindersSetup(false);
+              const all = pickedRows.length === 0;
+              void sendToReminders(all ? rows : pickedRows, all);
+            }}
+          />
+          <p className="muted setup-again">
+            Installed the shortcut already? This guide only shows the first time on
+            each phone.
+          </p>
+        </Sheet>
       )}
 
       {copyText !== null && (
@@ -260,7 +369,6 @@ export function ShoppingList() {
           onClose={() => setCopyText(null)}
         />
       )}
-      {toast && <div className="toast">✓ {toast}</div>}
     </section>
   );
 }

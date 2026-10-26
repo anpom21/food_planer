@@ -5,21 +5,18 @@ import {
   type RecipeMode,
   shopIconUrl,
   type PlanningSettings,
-  type Profile,
   type Shop,
 } from "./api";
 import { PromptEditor } from "./PromptEditor";
 
-// Issue #19 — the per-Profile Settings screen. The settled behavioural
+// The Settings sheet, opened from the ⚙ in the header. The settled behavioural
 // reference is the prototype's recommended variant (prototype/settings-screen,
 // "variant D"): a boxed layout of one card holding days-to-plan,
 // suggestions-per-day and the known-vs-unknown lean together; one card holding
 // the priority order as a drag-to-reorder list; and a full-width Inspiration
 // textarea. Preferred shops are a separate ticket and deliberately absent here.
 //
-// Settings are per-Profile (ADR 0001) and saved on their own via
-// PUT /api/profiles/{id}/settings — the screen never round-trips name and email
-// just to save a slider.
+// Settings are one household-wide set, saved together via PUT /api/settings.
 
 // The four priorities in a stable display order, keyed by the value stored in
 // settings.priority. Order in the list expresses what matters most, so no
@@ -184,7 +181,7 @@ function ShopPicker({
       setOtherOpen(true);
       setOtherText(others.join(", "));
     }
-    // Only seed from the catalog arriving / profile switching, not on each keystroke.
+    // Only seed from the catalog arriving, not on each keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog]);
 
@@ -267,18 +264,17 @@ const RECIPE_MODES: { mode: RecipeMode; label: string; hint: string }[] = [
   { mode: "none", label: "No online recipes", hint: "library and new dishes only" },
 ];
 
-// The Profile's planning settings, edited as a draft and saved together. Lives
-// on the Plan tab, right where the week is planned.
+// The household's planning settings, edited as a draft and saved together.
 export function PlanningSettingsForm({
-  profile,
+  settings,
   onSaved,
 }: {
-  profile: Profile;
-  onSaved: (profile: Profile) => void;
+  settings: PlanningSettings;
+  onSaved: (settings: PlanningSettings) => void;
 }) {
   // The draft is the working copy; nothing persists until Save. Starting from
-  // the profile's stored settings means the form reflects what's on disk.
-  const [draft, setDraft] = useState<PlanningSettings>(profile.settings);
+  // the stored settings means the form reflects what's on disk.
+  const [draft, setDraft] = useState<PlanningSettings>(settings);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -308,7 +304,7 @@ export function PlanningSettingsForm({
     setBusy(true);
     setError(null);
     try {
-      const updated = await saveSettings(profile.id, draft);
+      const updated = await saveSettings(draft);
       onSaved(updated);
       setSaved(true);
     } catch (e: unknown) {
@@ -321,7 +317,8 @@ export function PlanningSettingsForm({
   return (
     <form className="settings" onSubmit={submit}>
       <p className="muted">
-        Your preferences, yours alone — used every time you plan a week.
+        The defaults every plan starts from. You can still bend days and the
+        known-vs-new mix for a single plan from the Plan tab.
       </p>
 
       <section className="settings-card">
@@ -430,44 +427,31 @@ export function PlanningSettingsForm({
   );
 }
 
-// The Settings tab: what's shared by the whole household rather than one
-// person's planning preferences (those live on the Plan tab).
-export function SettingsScreen({ profile }: { profile: Profile }) {
+// What the ⚙ opens: the planning defaults, and the planner prompt behind them.
+export function SettingsPanel({
+  settings,
+  onSaved,
+}: {
+  settings: PlanningSettings;
+  onSaved: (settings: PlanningSettings) => void;
+}) {
   const [promptOpen, setPromptOpen] = useState(false);
   return (
-    <div className="settings">
-      <h1>Settings</h1>
-      <p className="muted">
-        Your planning settings now live on the Plan tab, under ⚙ Planning
-        settings.
-      </p>
+    <div className="settings-panel">
+      <PlanningSettingsForm settings={settings} onSaved={onSaved} />
       <section className="settings-card prompt-card">
         <div>
-          <label>
-            Planner prompt{" "}
-            <span className="hint">— shared by the whole household</span>
-          </label>
+          <label>Planner prompt</label>
           <p className="muted">
-            The instructions sent to the model, with your settings filled in
-            wherever a <code className="var-token">{"{{variable}}"}</code>{" "}
-            appears.
+            The instructions sent to the model, with these settings filled in
+            wherever a <code className="var-token">{"{{variable}}"}</code> appears.
           </p>
         </div>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => setPromptOpen(true)}
-        >
-          ⚙ Edit prompt…
+        <button type="button" className="btn" onClick={() => setPromptOpen(true)}>
+          Edit prompt…
         </button>
       </section>
-
-      {promptOpen && (
-        <PromptEditor
-          profileId={profile.id}
-          onClose={() => setPromptOpen(false)}
-        />
-      )}
+      {promptOpen && <PromptEditor onClose={() => setPromptOpen(false)} />}
     </div>
   );
 }

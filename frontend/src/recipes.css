@@ -1,19 +1,4 @@
 /* Recipes screen ------------------------------------------------------------ */
-.recipe-search {
-  min-width: 280px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font: inherit;
-  font-size: 14px;
-  background: var(--panel);
-  color: var(--ink);
-}
-
-.recipe-count {
-  margin: -12px 0 12px;
-  font-size: 13px;
-}
 
 .recipe-card {
   display: flex;
@@ -59,69 +44,9 @@
   padding: 14px 16px 16px;
 }
 
-.recipe-link {
-  margin-top: auto;
-  text-decoration: none;
-  text-align: center;
-}
-
-.recipe-more {
-  display: flex;
-  justify-content: center;
-  padding: 24px 0 0;
-}
-
-@media (max-width: 820px) {
-  .recipes .grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 540px) {
-  .recipes .toolbar {
-    flex-direction: column;
-  }
-  .recipe-search {
-    min-width: 0;
-    width: 100%;
-  }
-  .recipes .grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* "Til ugens madplan": why each recipe is relevant this week */
-.recipe-tabs {
-  display: flex;
-  gap: 6px;
-  margin: -8px 0 18px;
-}
-
-.recipe-tabs button {
-  border: 1px solid var(--line);
-  background: var(--panel);
-  color: var(--ink-soft);
-  border-radius: 999px;
-  padding: 6px 14px;
-  font: inherit;
-  font-size: 13.5px;
-  cursor: pointer;
-}
-
-.recipe-tabs button.on {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: #fff;
-}
-
 .recipe-card .sugg-chips {
   margin-bottom: 12px;
 }
-
-.recipe-card .sugg-actions {
-  margin-bottom: 8px;
-}
-
 
 .chip.have-fresh {
   background: #eef6ea;

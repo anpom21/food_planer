@@ -1,7 +1,6 @@
 // Typed wrappers over the same-origin /api endpoints.
 //
-// Profiles (issue #17): the backend is the single source of truth; localStorage
-// holds only the profileId pointer.
+// Settings: one household-wide set of planning preferences (no profiles).
 // Dishes (issue #18): title required; ingredients, substitutes and recipe are
 // optional freeform text; PUT is a full replace.
 
@@ -18,16 +17,6 @@ export type PlanningSettings = {
 };
 
 export type RecipeMode = "only" | "mix" | "none";
-
-export type ProfileSummary = {
-  id: string;
-  email: string;
-  name: string;
-};
-
-export type Profile = ProfileSummary & {
-  settings: PlanningSettings;
-};
 
 export type Dish = {
   id: string;
@@ -52,6 +41,8 @@ export type SuggestionIngredient = {
   name: string;
   quantity: string; // free text: "200 g", "1 pinch"
   have?: OnHand;
+  // A recipe dish's sub-list ("Til servering"); null for the main list.
+  group?: string | null;
 };
 
 // The imported recipe a Suggestion is based on: its link, thumbnail and the
@@ -82,6 +73,10 @@ export type Discount = {
   validUntil: string | null;
   imageUrl: string | null;
   matchedIngredient: string | null;
+  // The settings slug of the offer's shop ("coop-365"); null for a dealer
+  // that isn't one of the known chains. Dishes only show offers from shops
+  // that are selected in settings.
+  shopSlug?: string | null;
   // Who tied it to the dish: cited by the model, an exact name match, or an
   // uncertain name match the model confirmed in review.
   matchedBy?: "model" | "name" | "review";
@@ -106,8 +101,6 @@ export type DayPlan = {
 export type PlanningRun = {
   id: string;
   createdAt: string;
-  profileId: string;
-  profileName: string;
   status: "success" | "partial" | "failed";
   days: DayPlan[];
   dayCount: number;
@@ -129,8 +122,6 @@ export type PlanningRun = {
 export type PlanningRunSummary = {
   id: string;
   createdAt: string;
-  profileId: string;
-  profileName: string;
   dayCount: number;
   status: "success" | "partial" | "failed";
   fridgeSnippet: string;
@@ -161,41 +152,17 @@ async function json<T>(resp: Response): Promise<T> {
   return resp.json() as Promise<T>;
 }
 
-// Find-or-create: a new email creates a Profile; an existing one wins and the
-// typed name is discarded server-side.
-export async function identify(email: string, name: string): Promise<Profile> {
-  const resp = await fetch("/api/profiles/identify", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, name }),
-  });
-  return json<Profile>(resp);
+export function getSettings(): Promise<PlanningSettings> {
+  return fetch("/api/settings").then((r) => json<PlanningSettings>(r));
 }
 
-export async function listProfiles(): Promise<ProfileSummary[]> {
-  return json<ProfileSummary[]>(await fetch("/api/profiles"));
-}
-
-// Resolve the stored pointer. Returns null when the id no longer exists (e.g.
-// a wiped data/), so the caller falls back to the identify screen.
-export async function getProfile(id: string): Promise<Profile | null> {
-  const resp = await fetch(`/api/profiles/${id}`);
-  if (resp.status === 404) return null;
-  return json<Profile>(resp);
-}
-
-// Save a Profile's PlanningSettings alone (issue #19). The Settings screen
-// never round-trips name and email just to save a slider, so this PUTs the
-// settings block by itself and gets the updated Profile back.
-export function saveSettings(
-  id: string,
-  settings: PlanningSettings,
-): Promise<Profile> {
-  return fetch(`/api/profiles/${id}/settings`, {
+// A full replace: the household's settings become exactly `settings`.
+export function saveSettings(settings: PlanningSettings): Promise<PlanningSettings> {
+  return fetch("/api/settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(settings),
-  }).then((r) => json<Profile>(r));
+  }).then((r) => json<PlanningSettings>(r));
 }
 
 // The fixed Danish-chain catalog for the preferred-shops picker (issue #20).
@@ -235,17 +202,16 @@ export type Recipe = {
   categories: string[];
   description: string;
   ingredients: RecipeIngredient[];
-  discounts: (Discount & { review?: boolean })[];
+  discounts: Discount[]; // 1:1 offer matches only
   estimatedCost: number; // rough, DKK
   prepTimeMinutes: number | null;
   counts: { fresh: number; staple: number; offers: number };
   recipe: SuggestionRecipe;
 };
 
-// With a profile, the cards include this week's offers at its shops.
-export function listRecipes(profileId?: string): Promise<Recipe[]> {
-  const query = profileId ? `?profileId=${encodeURIComponent(profileId)}` : "";
-  return fetch(`/api/recipes${query}`).then((r) => json<Recipe[]>(r));
+// Every imported recipe, with this week's offers at the household's shops.
+export function listRecipes(): Promise<Recipe[]> {
+  return fetch("/api/recipes").then((r) => json<Recipe[]>(r));
 }
 
 // A recipe card as a Suggestion, so the plan's Details and Add-ingredients
@@ -254,7 +220,12 @@ export function recipeAsSuggestion(recipe: Recipe): Suggestion {
   return {
     title: recipe.title,
     description: recipe.description,
-    ingredients: recipe.ingredients.map(({ name, quantity, have }) => ({ name, quantity, have })),
+    ingredients: recipe.ingredients.map(({ name, quantity, have, group }) => ({
+      name,
+      quantity,
+      have,
+      group,
+    })),
     estimatedCost: recipe.estimatedCost,
     prepTimeMinutes: recipe.prepTimeMinutes ?? 0,
     sourceDish: null,
@@ -279,10 +250,8 @@ export type RecipeMatch = Recipe & {
   }[];
 };
 
-export function listRecipeMatches(profileId: string): Promise<RecipeMatch[]> {
-  return fetch(`/api/recipes/matches?profileId=${encodeURIComponent(profileId)}`).then(
-    (r) => json<RecipeMatch[]>(r),
-  );
+export function listRecipeMatches(): Promise<RecipeMatch[]> {
+  return fetch("/api/recipes/matches").then((r) => json<RecipeMatch[]>(r));
 }
 
 export function createDish(input: DishInput): Promise<Dish> {
@@ -305,20 +274,16 @@ export function replaceDish(id: string, input: DishInput): Promise<Dish> {
 
 // One press of "Plan my week" — the finished run comes back synchronously, so
 // there is nothing to poll. A failed run still returns 200 with its body.
-export function planWeek(
-  profileId: string,
-  settingsOverride?: SettingsOverride,
-): Promise<PlanningRun> {
+export function planWeek(settingsOverride?: SettingsOverride): Promise<PlanningRun> {
   return fetch("/api/planning-runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ profileId, settingsOverride }),
+    body: JSON.stringify({ settingsOverride }),
   }).then((r) => json<PlanningRun>(r));
 }
 
 // The Past-plans archive (issue #26): every run the household has ever made,
-// newest first and household-wide (not just the current Profile's), as
-// summaries. Picking one loads its full run via getPlanningRun.
+// newest first, as summaries. Picking one loads its full run via getPlanningRun.
 export function listPlanningRuns(): Promise<PlanningRunSummary[]> {
   return fetch("/api/planning-runs").then((r) =>
     json<PlanningRunSummary[]>(r),
@@ -343,6 +308,15 @@ export type ShoppingItemInput = {
   // A free-text note carried by a hand-added item; surfaces in the CSV Notes
   // column for rows that have no dish behind them.
   note?: string;
+  // The offer the ingredient was on, so the list keeps its shop.
+  offer?: ShoppingOffer | null;
+};
+
+export type ShoppingOffer = {
+  shop: string; // as Tjek names it, e.g. "365discount"
+  shopSlug: string | null; // the settings slug, e.g. "coop-365"
+  productName: string;
+  price: number | null;
 };
 
 // A merged ShoppingList row as the backend folds it (issue #22/#29): one row
@@ -358,10 +332,26 @@ export type ShoppingRow = {
   }[];
   lineIds: string[];
   note: string;
+  // The offers behind the row; rows arrive grouped by the first one's shop.
+  offers: ShoppingOffer[];
 };
 
 export function getShoppingList(): Promise<ShoppingRow[]> {
   return fetch("/api/shopping-list").then((r) => json<ShoppingRow[]>(r));
+}
+
+// The list as reminders for the iPhone's Påmindelser: a title and a subtext
+// (amount · which dishes) per row. Only `rows` when given, else everything.
+export type Reminder = { title: string; notes: string };
+
+export function exportReminders(rows?: ShoppingRow[]): Promise<Reminder[]> {
+  return fetch("/api/shopping-list/export/reminders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(rows ? { lineIds: rows.flatMap((r) => r.lineIds) } : {}),
+  })
+    .then((r) => json<{ items: Reminder[] }>(r))
+    .then((b) => b.items);
 }
 
 // Remove rows from the list (every line behind each merged row); returns the
@@ -408,7 +398,7 @@ export function deleteDish(id: string): Promise<void> {
 }
 
 // The planning prompt: one household-wide template. Values derived from the
-// library and a Profile's settings are injected wherever a {{variable}}
+// library and the household's settings are injected wherever a {{variable}}
 // appears; the backend refuses a template naming a variable it can't fill.
 export type PromptVariable = { name: string; description: string };
 
@@ -443,16 +433,12 @@ export function savePrompt(
   }).then((r) => json<PromptConfig>(r));
 }
 
-// Render a draft template for a Profile without saving it or calling the model.
-export function previewPrompt(
-  profileId: string,
-  template: string,
-  offerLimit: number,
-): Promise<PromptSegment[]> {
+// Render a draft template without saving it or calling the model.
+export function previewPrompt(template: string, offerLimit: number): Promise<PromptSegment[]> {
   return fetch("/api/prompt/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ profileId, template, offerLimit }),
+    body: JSON.stringify({ template, offerLimit }),
   })
     .then((r) => json<{ segments: PromptSegment[] }>(r))
     .then((b) => b.segments);

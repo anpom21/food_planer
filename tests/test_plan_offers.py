@@ -57,19 +57,15 @@ def _suggestion(title: str, discounts: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _profile(client: TestClient, shops: list[str], days: int = 1, per_day: int = 1) -> str:
-    profile_id = client.post(
-        "/api/profiles/identify", json={"email": "ada@ex.com", "name": "Ada"}
-    ).json()["id"]
+def _settings(client: TestClient, shops: list[str], days: int = 1, per_day: int = 1) -> None:
     client.put(
-        f"/api/profiles/{profile_id}/settings",
+        "/api/settings",
         json={"daysToPlan": days, "suggestionsPerDay": per_day, "shops": shops},
     )
-    return profile_id
 
 
-def _plan(client: TestClient, profile_id: str) -> dict[str, Any]:
-    resp = client.post("/api/planning-runs", json={"profileId": profile_id})
+def _plan(client: TestClient) -> dict[str, Any]:
+    resp = client.post("/api/planning-runs", json={})
     assert resp.status_code == 200
     return resp.json()
 
@@ -84,9 +80,9 @@ def test_preferred_shop_offers_reach_the_prompt_with_ids(
 ) -> None:
     _stock_netto(fake_tjek, [_raw_offer("t-1", "Hakket oksekød 8-12%", 35, 45)])
     fake_openai.canned = {"days": [{"day": 1, "suggestions": [_suggestion("Chili", [])]}]}
-    profile_id = _profile(client, shops=["netto"])
+    _settings(client, shops=["netto"])
 
-    run = _plan(client, profile_id)
+    run = _plan(client)
 
     prompt = fake_openai.prompts[-1]
     assert "[o1] Netto: Hakket oksekød 8-12% — 400 g — 35 kr (was 45 kr)" in prompt
@@ -108,7 +104,8 @@ def test_non_food_is_kept_out_of_the_prompt(client, fake_openai, fake_tjek) -> N
     )
     fake_openai.canned = {"days": [{"day": 1, "suggestions": [_suggestion("Chili", [])]}]}
 
-    _plan(client, _profile(client, shops=["netto"]))
+    _settings(client, shops=["netto"])
+    _plan(client)
 
     prompt = fake_openai.prompts[-1]
     assert "Frisko isbæger" in prompt
@@ -131,7 +128,8 @@ def test_library_matches_rank_ahead_of_bigger_discounts(
     client.post("/api/dishes", json={"title": "Suppe", "ingredients": "løg, smør"})
     fake_openai.canned = {"days": [{"day": 1, "suggestions": [_suggestion("Chili", [])]}]}
 
-    _plan(client, _profile(client, shops=["netto"]))
+    _settings(client, shops=["netto"])
+    _plan(client)
 
     prompt = fake_openai.prompts[-1]
     assert prompt.index("[o1] Netto: Samsø rødløg") < prompt.index("Chips")
@@ -145,7 +143,8 @@ def test_offer_count_is_capped_at_the_household_limit(
     fake_openai.canned = {"days": [{"day": 1, "suggestions": [_suggestion("Chili", [])]}]}
     client.put("/api/prompt", json={"template": None, "offerLimit": 100})
 
-    run = _plan(client, _profile(client, shops=["netto"]))
+    _settings(client, shops=["netto"])
+    run = _plan(client)
 
     assert run["offerCount"] == 100
     assert "[o100]" in fake_openai.prompts[-1]
@@ -156,7 +155,8 @@ def test_no_preferred_shops_plans_without_offers(client, fake_openai, fake_tjek)
     _stock_netto(fake_tjek, [_raw_offer("t-1", "Hakket oksekød")])
     fake_openai.canned = {"days": [{"day": 1, "suggestions": [_suggestion("Chili", [])]}]}
 
-    run = _plan(client, _profile(client, shops=[]))
+    _settings(client, shops=[])
+    run = _plan(client)
 
     assert run["status"] == "success"
     assert run["offerCount"] == 0
@@ -168,7 +168,8 @@ def test_tjek_failure_plans_anyway_and_says_so(client, fake_openai, fake_tjek) -
     fake_tjek.fail = True
     fake_openai.canned = {"days": [{"day": 1, "suggestions": [_suggestion("Chili", [])]}]}
 
-    run = _plan(client, _profile(client, shops=["netto", "rema-1000"]))
+    _settings(client, shops=["netto", "rema-1000"])
+    run = _plan(client)
 
     assert run["status"] == "success"
     assert run["offerCount"] == 0
@@ -195,7 +196,8 @@ def test_cited_offers_are_stored_in_full(client, fake_openai, fake_tjek) -> None
         ]
     }
 
-    run = _plan(client, _profile(client, shops=["netto"]))
+    _settings(client, shops=["netto"])
+    run = _plan(client)
 
     (discount,) = run["days"][0]["suggestions"][0]["discounts"]
     assert discount == {
@@ -203,6 +205,7 @@ def test_cited_offers_are_stored_in_full(client, fake_openai, fake_tjek) -> None
         "productName": "Hakket oksekød 8-12%",
         "description": None,
         "shop": "Netto",
+        "shopSlug": "netto",
         "price": 35,
         "originalPrice": 50,
         "discountPercent": 30.0,
@@ -230,11 +233,11 @@ def test_schema_asks_only_for_offer_references() -> None:
 
 def test_preview_shows_the_offers(client, fake_tjek) -> None:
     _stock_netto(fake_tjek, [_raw_offer("t-1", "Hakket oksekød")])
-    profile_id = _profile(client, shops=["netto"])
+    _settings(client, shops=["netto"])
 
     segments = client.post(
         "/api/prompt/preview",
-        json={"profileId": profile_id, "template": "{{offers}}"},
+        json={"template": "{{offers}}"},
     ).json()["segments"]
 
     assert segments[0]["variable"] == "offers"
@@ -262,7 +265,8 @@ def test_uncited_ingredients_are_matched_to_offers_by_name(
     ]
     fake_openai.canned = {"days": [{"day": 1, "suggestions": [suggestion]}]}
 
-    run = _plan(client, _profile(client, shops=["netto"]))
+    _settings(client, shops=["netto"])
+    run = _plan(client)
 
     discounts = run["days"][0]["suggestions"][0]["discounts"]
     by_ingredient = {d["matchedIngredient"]: d["productName"] for d in discounts}
@@ -284,7 +288,8 @@ def test_shops_take_turns_in_the_capped_list(client, fake_openai, fake_tjek) -> 
     fake_openai.canned = {"days": [{"day": 1, "suggestions": [_suggestion("Chili", [])]}]}
     client.put("/api/prompt", json={"template": None, "offerLimit": 100})
 
-    _plan(client, _profile(client, shops=["netto", "rema-1000"]))
+    _settings(client, shops=["netto", "rema-1000"])
+    _plan(client)
 
     lines = [l for l in fake_openai.prompts[-1].splitlines() if l.startswith("[o")]
     assert len(lines) == 100
@@ -299,7 +304,8 @@ def test_dish_titles_steer_the_ranking(client, fake_openai, fake_tjek) -> None:
     client.post("/api/dishes", json={"title": "Lasagne"})  # a bare title
     fake_openai.canned = {"days": [{"day": 1, "suggestions": [_suggestion("Chili", [])]}]}
 
-    _plan(client, _profile(client, shops=["netto"]))
+    _settings(client, shops=["netto"])
+    _plan(client)
 
     assert "[o1] Netto: Lasagneplader" in fake_openai.prompts[-1]
 
@@ -324,7 +330,8 @@ def test_every_run_writes_a_debug_trace(
     }
     fake_openai.canned = raw
 
-    run = _plan(client, _profile(client, shops=["netto"]))
+    _settings(client, shops=["netto"])
+    run = _plan(client)
 
     trace = json.loads((data_dir / "run_logs" / f"{run['id']}.json").read_text("utf-8"))
     assert trace["settings"]["shops"] == ["netto"]
@@ -367,7 +374,8 @@ def test_offer_limit_zero_lists_none_but_still_matches_by_name(
     fake_openai.canned = {"days": [{"day": 1, "suggestions": [_suggestion("Chili", [])]}]}
     client.put("/api/prompt", json={"template": None, "offerLimit": 0})
 
-    run = _plan(client, _profile(client, shops=["netto"]))
+    _settings(client, shops=["netto"])
+    run = _plan(client)
 
     assert run["offerCount"] == 0
     assert "[o1]" not in fake_openai.prompts[-1]

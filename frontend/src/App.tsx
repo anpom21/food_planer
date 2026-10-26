@@ -1,421 +1,254 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  createDish,
-  deleteDish,
-  getProfile,
-  identify,
-  listDishes,
-  listProfiles,
-  replaceDish,
-  type Dish,
-  type DishInput,
-  type Profile,
-  type ProfileSummary,
+  getFridge,
+  getSettings,
+  getShoppingList,
+  type PlanningSettings,
 } from "./api";
-import { DishEditor } from "./DishEditor";
+import { Dishes } from "./Dishes";
 import { Fridge } from "./Fridge";
+import { HouseholdContext, type Household, type Tab, type ToastAction } from "./household";
 import { Offers } from "./Offers";
 import { PlanWeek } from "./PlanWeek";
-import { Recipes } from "./Recipes";
-import { SettingsScreen } from "./SettingsScreen";
+import { SettingsPanel } from "./SettingsScreen";
+import { Sheet } from "./Sheet";
 import { ShoppingList } from "./ShoppingList";
 import "./app.css";
+import "./shell.css";
 
-// Issue #17 — Identify yourself and switch profiles.
+// The app shell: four tabs — plan the week, what's in the fridge, dishes,
+// the shopping list — with settings behind the ⚙. On a phone the tabs sit in
+// a bottom bar under your thumb; on a wider screen they're in the header. The
+// tab lives in the URL hash so reload and the back button keep your place.
 //
-// localStorage holds one thing: `foodPlanner.profileId`, a pointer. On load we
-// resolve it against the backend (the single source of truth). No pointer, or a
-// pointer the backend no longer knows, falls straight back to the identify
-// form — clearing browser storage costs nothing, since retyping the email
-// resolves to the same Profile.
+// One household, no profiles: everyone shares the same settings, fridge,
+// dishes and list.
 
-const PROFILE_ID_KEY = "foodPlanner.profileId";
+const ICONS: Record<Tab | "settings", ReactNode> = {
+  plan: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3.5" y="5" width="17" height="15" rx="2.5" />
+      <path d="M3.5 10h17M8 3v4M16 3v4" />
+    </svg>
+  ),
+  fridge: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="5.5" y="2.5" width="13" height="19" rx="2.5" />
+      <path d="M5.5 10h13M9 6v2M9 13v3" />
+    </svg>
+  ),
+  dishes: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 12h18a9 9 0 0 1-18 0Z" />
+      <path d="M9 8c0-1.5 1-2 1-3.5M13 8c0-1.5 1-2 1-3.5" />
+    </svg>
+  ),
+  shopping: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 4h2.5l2.2 11h10.6l2-8H6.6" />
+      <circle cx="9.5" cy="19" r="1.4" />
+      <circle cx="17" cy="19" r="1.4" />
+    </svg>
+  ),
+  settings: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+    </svg>
+  ),
+};
 
-const readPointer = () => localStorage.getItem(PROFILE_ID_KEY);
-const writePointer = (id: string) => localStorage.setItem(PROFILE_ID_KEY, id);
+const TABS: { tab: Tab; label: string; short: string }[] = [
+  { tab: "plan", label: "Plan my week", short: "Plan" },
+  { tab: "fridge", label: "What is in the fridge", short: "Fridge" },
+  { tab: "dishes", label: "Dishes", short: "Dishes" },
+  { tab: "shopping", label: "Shopping list", short: "Shopping" },
+];
 
-// The one single-step form: email and display name, submitted together. No
-// async validation while typing, no branching UI — the same form both first
-// visitors and "Add a profile" land on.
-function IdentifyForm({
-  onIdentified,
-  onCancel,
+const isTab = (value: string): value is Tab => TABS.some((t) => t.tab === value);
+const tabFromHash = (): Tab => {
+  const hash = window.location.hash.slice(1);
+  return isTab(hash) ? hash : "plan";
+};
+
+type Toast = { id: number; message: string; action?: ToastAction };
+
+function TabButtons({
+  tab,
+  counts,
+  onPick,
+  short,
 }: {
-  onIdentified: (profile: Profile) => void;
-  onCancel?: () => void;
+  tab: Tab;
+  counts: Partial<Record<Tab, number>>;
+  onPick: (tab: Tab) => void;
+  short: boolean;
 }) {
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      onIdentified(await identify(email, name));
-    } catch (e: unknown) {
-      setError(String(e));
-      setBusy(false);
-    }
-  };
-
   return (
-    <form onSubmit={submit} style={{ display: "grid", gap: "0.75rem", maxWidth: 320 }}>
-      <label style={{ display: "grid", gap: "0.25rem" }}>
-        Email
-        <input
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          autoFocus
-        />
-      </label>
-      <label style={{ display: "grid", gap: "0.25rem" }}>
-        Display name
-        <input
-          type="text"
-          required
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-      </label>
-      <div style={{ display: "flex", gap: "0.5rem" }}>
-        <button type="submit" disabled={busy}>
-          {busy ? "…" : "Continue"}
-        </button>
-        {onCancel && (
-          <button type="button" onClick={onCancel} disabled={busy}>
-            Cancel
-          </button>
-        )}
-      </div>
-      {error && <p style={{ color: "crimson" }}>{error}</p>}
-    </form>
-  );
-}
-
-// The switcher: everyone in the household plus a trailing "Add a profile" that
-// opens the same form. Picking someone swaps to their preferences immediately —
-// no password, no re-auth.
-function ProfileSwitcher({
-  current,
-  onSwitch,
-  onAdd,
-}: {
-  current: Profile;
-  onSwitch: (id: string) => void;
-  onAdd: () => void;
-}) {
-  const [profiles, setProfiles] = useState<ProfileSummary[]>([]);
-
-  useEffect(() => {
-    listProfiles()
-      .then(setProfiles)
-      .catch(() => setProfiles([]));
-  }, [current.id]);
-
-  return (
-    <nav style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-      {profiles.map((p) => (
+    <>
+      {TABS.map((t) => (
         <button
-          key={p.id}
-          onClick={() => onSwitch(p.id)}
-          aria-current={p.id === current.id}
-          style={{ fontWeight: p.id === current.id ? 700 : 400 }}
+          key={t.tab}
+          className={`tab${tab === t.tab ? " on" : ""}`}
+          aria-current={tab === t.tab ? "page" : undefined}
+          onClick={() => onPick(t.tab)}
         >
-          {p.name}
+          <span className="tab-icon">
+            {ICONS[t.tab]}
+            {counts[t.tab] ? <span className="tab-badge">{counts[t.tab]}</span> : null}
+          </span>
+          <span className="tab-label">{short ? t.short : t.label}</span>
         </button>
       ))}
-      <button onClick={onAdd}>+ Add a profile</button>
-    </nav>
+    </>
   );
 }
-
-// The Dish library screen (issue #18): a three-column card grid the household
-// shares. Adding a dish takes a title and five seconds; everything else is
-// optional detail behind one toggle in the editor.
-
-// A card's excerpt is whichever optional field is filled first, in the order
-// recipe → ingredients → substitutes. When the card carries no ⭐ label the
-// freed row lets the excerpt run longer.
-const EXCERPT_UNTAGGED = 130;
-const EXCERPT_TAGGED = 70;
-
-function excerptFor(dish: Dish): string {
-  const source = dish.recipe || dish.ingredients || dish.substitutes || "";
-  const limit = dish.favourite ? EXCERPT_TAGGED : EXCERPT_UNTAGGED;
-  if (source.length <= limit) return source;
-  return source.slice(0, limit) + "…";
-}
-
-// `null` = editor closed; a Dish = editing it; "new" = the add flow.
-type EditorTarget = Dish | "new" | null;
-
-function DishLibrary() {
-  const [dishes, setDishes] = useState<Dish[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<EditorTarget>(null);
-
-  useEffect(() => {
-    listDishes().then(setDishes).catch((e: unknown) => setError(String(e)));
-  }, []);
-
-  async function handleSave(input: DishInput) {
-    const saved =
-      editing && editing !== "new"
-        ? await replaceDish(editing.id, input)
-        : await createDish(input);
-    setDishes((prev) => {
-      const rest = (prev ?? []).filter((d) => d.id !== saved.id);
-      return [...rest, saved];
-    });
-    setEditing(null);
-  }
-
-  async function handleDelete(dish: Dish) {
-    // A trash icon, distinct from the click-to-edit card, deletes only after
-    // an explicit confirm so a mis-click can't lose a Dish.
-    if (!window.confirm(`Delete "${dish.title}"?`)) return;
-    await deleteDish(dish.id);
-    setDishes((prev) => (prev ?? []).filter((d) => d.id !== dish.id));
-  }
-
-  if (error) {
-    return (
-      <section className="library">
-        <p className="error">Could not load the Dish library: {error}</p>
-      </section>
-    );
-  }
-
-  if (dishes === null) {
-    return (
-      <section className="library">
-        <p className="muted">Loading…</p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="library">
-      <header className="toolbar">
-        <div>
-          <h1>Dish library</h1>
-          <p className="muted">The meals your household already knows how to make.</p>
-        </div>
-        <button className="btn primary" onClick={() => setEditing("new")}>
-          + Add Dish
-        </button>
-      </header>
-
-      {dishes.length === 0 ? (
-        <div className="empty-state">
-          <button className="btn primary large" onClick={() => setEditing("new")}>
-            + Add your first dish
-          </button>
-        </div>
-      ) : (
-        <div className="grid">
-          {dishes.map((dish) => (
-            <article
-              key={dish.id}
-              className="card"
-              role="button"
-              tabIndex={0}
-              onClick={() => setEditing(dish)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setEditing(dish);
-                }
-              }}
-            >
-              <button
-                className="card-delete"
-                title="Delete"
-                aria-label={`Delete ${dish.title}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void handleDelete(dish);
-                }}
-              >
-                🗑
-              </button>
-              <h2 className="card-title">{dish.title}</h2>
-              {dish.favourite && <span className="fav-label">⭐ Favourite</span>}
-              <p className="card-excerpt">
-                {excerptFor(dish) || (
-                  <em className="muted">No extra detail added yet</em>
-                )}
-              </p>
-            </article>
-          ))}
-
-          {/* The dashed end-of-grid tile — a third way into the same add flow. */}
-          <button
-            className="card add-tile"
-            onClick={() => setEditing("new")}
-          >
-            + Add Dish
-          </button>
-        </div>
-      )}
-
-      {editing !== null && (
-        <DishEditor
-          dish={editing === "new" ? null : editing}
-          onSave={handleSave}
-          onCancel={() => setEditing(null)}
-        />
-      )}
-    </section>
-  );
-}
-
-type Screen =
-  | "plan"
-  | "fridge"
-  | "library"
-  | "recipes"
-  | "shopping"
-  | "offers"
-  | "settings";
 
 export function App() {
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
-  // Shown when there's no current profile, or when "Add a profile" is picked.
-  const [identifying, setIdentifying] = useState(false);
-  const [screen, setScreen] = useState<Screen>("plan");
+  const [settings, setSettings] = useState<PlanningSettings | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>(tabFromHash);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [offersOpen, setOffersOpen] = useState(false);
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [counts, setCounts] = useState<Partial<Record<Tab, number>>>({});
+  const toastTimer = useRef<number>();
 
-  // Resolve the stored pointer on load.
-  useEffect(() => {
-    const id = readPointer();
-    if (!id) {
-      setLoading(false);
-      return;
-    }
-    getProfile(id)
-      .then((p) => {
-        if (p) setProfile(p);
-      })
-      .catch(() => undefined)
-      .finally(() => setLoading(false));
+  const loadSettings = useCallback(() => {
+    setLoadError(null);
+    getSettings()
+      .then(setSettings)
+      .catch((e: unknown) => setLoadError(String(e)));
   }, []);
 
-  const adopt = (p: Profile) => {
-    writePointer(p.id);
-    setProfile(p);
-    setIdentifying(false);
-  };
+  const refreshCounts = useCallback(() => {
+    getFridge()
+      .then((f) => setCounts((c) => ({ ...c, fridge: f.fresh.length })))
+      .catch(() => undefined);
+    getShoppingList()
+      .then((rows) => setCounts((c) => ({ ...c, shopping: rows.length })))
+      .catch(() => undefined);
+  }, []);
 
-  const switchTo = async (id: string) => {
-    const p = await getProfile(id);
-    if (p) adopt(p);
-  };
+  useEffect(() => {
+    loadSettings();
+    refreshCounts();
+    const onHash = () => setTab(tabFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, [loadSettings, refreshCounts]);
 
-  if (loading) {
-    return <main style={shellStyle}>Loading…</main>;
-  }
+  const go = useCallback((next: Tab) => {
+    if (window.location.hash.slice(1) !== next) window.location.hash = next;
+    setTab(next);
+    window.scrollTo({ top: 0 });
+  }, []);
 
-  // First visit, cleared storage, or "Add a profile" — the same single form.
-  if (!profile || identifying) {
+  const notify = useCallback((message: string, action?: ToastAction) => {
+    window.clearTimeout(toastTimer.current);
+    setToast({ id: Date.now(), message, action });
+    toastTimer.current = window.setTimeout(() => setToast(null), action ? 4500 : 2600);
+  }, []);
+
+  const household = useMemo<Household | null>(
+    () =>
+      settings && {
+        settings,
+        setSettings,
+        go,
+        notify,
+        openSettings: () => setSettingsOpen(true),
+        openOffers: () => setOffersOpen(true),
+        refreshCounts,
+      },
+    [settings, go, notify, refreshCounts],
+  );
+
+  if (!household) {
     return (
-      <main style={shellStyle}>
-        <h1>Food Planner</h1>
-        <p>Type your email and a display name to get started.</p>
-        <IdentifyForm
-          onIdentified={adopt}
-          onCancel={profile ? () => setIdentifying(false) : undefined}
-        />
-      </main>
+      <div className="splash">
+        <div className="brand-mark">🥕</div>
+        {loadError ? (
+          <>
+            <p className="error">Could not reach the planner: {loadError}</p>
+            <button className="btn" onClick={loadSettings}>
+              Try again
+            </button>
+          </>
+        ) : (
+          <p className="muted">Loading…</p>
+        )}
+      </div>
     );
   }
 
   return (
-    <main style={shellStyle}>
-      <h1>Food Planner</h1>
-      <ProfileSwitcher
-        current={profile}
-        onSwitch={switchTo}
-        onAdd={() => setIdentifying(true)}
-      />
-      <p>
-        Signed in as <strong>{profile.name}</strong> ({profile.email}).
-      </p>
-      <nav style={{ display: "flex", gap: "0.5rem" }}>
-        <button
-          onClick={() => setScreen("plan")}
-          aria-current={screen === "plan"}
-          style={{ fontWeight: screen === "plan" ? 700 : 400 }}
-        >
-          Plan a week
-        </button>
-        <button
-          onClick={() => setScreen("fridge")}
-          aria-current={screen === "fridge"}
-          style={{ fontWeight: screen === "fridge" ? 700 : 400 }}
-        >
-          What is in the fridge?
-        </button>
-        <button
-          onClick={() => setScreen("library")}
-          aria-current={screen === "library"}
-          style={{ fontWeight: screen === "library" ? 700 : 400 }}
-        >
-          Dish library
-        </button>
-        <button
-          onClick={() => setScreen("recipes")}
-          aria-current={screen === "recipes"}
-          style={{ fontWeight: screen === "recipes" ? 700 : 400 }}
-        >
-          Inspiration
-        </button>
-        <button
-          onClick={() => setScreen("shopping")}
-          aria-current={screen === "shopping"}
-          style={{ fontWeight: screen === "shopping" ? 700 : 400 }}
-        >
-          Shopping list
-        </button>
-        <button
-          onClick={() => setScreen("offers")}
-          aria-current={screen === "offers"}
-          style={{ fontWeight: screen === "offers" ? 700 : 400 }}
-        >
-          Tilbudsavis
-        </button>
-        <button
-          onClick={() => setScreen("settings")}
-          aria-current={screen === "settings"}
-          style={{ fontWeight: screen === "settings" ? 700 : 400 }}
-        >
-          Settings
-        </button>
-      </nav>
-      {screen === "plan" && (
-        <PlanWeek key={profile.id} profile={profile} onSettingsSaved={setProfile} />
-      )}
-      {screen === "fridge" && <Fridge />}
-      {screen === "library" && <DishLibrary />}
-      {screen === "recipes" && <Recipes key={profile.id} profile={profile} />}
-      {screen === "shopping" && <ShoppingList />}
-      {screen === "offers" && <Offers key={profile.id} profile={profile} />}
-      {screen === "settings" && (
-        <SettingsScreen key={profile.id} profile={profile} />
-      )}
-    </main>
+    <HouseholdContext.Provider value={household}>
+      <div className="shell">
+        <header className="topbar">
+          <button className="brand" onClick={() => go("plan")}>
+            <span className="brand-mark">🥕</span>
+            <span className="brand-name">Food Planner</span>
+          </button>
+          <nav className="tabs-top" aria-label="Sections">
+            <TabButtons tab={tab} counts={counts} onPick={go} short={false} />
+          </nav>
+          <button
+            className="icon-btn settings-btn"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Settings"
+            title="Settings"
+          >
+            {ICONS.settings}
+          </button>
+        </header>
+
+        <main className="screen">
+          {tab === "plan" && <PlanWeek />}
+          {tab === "fridge" && <Fridge />}
+          {tab === "dishes" && <Dishes />}
+          {tab === "shopping" && <ShoppingList />}
+        </main>
+
+        <nav className="tabs-bottom" aria-label="Sections">
+          <TabButtons tab={tab} counts={counts} onPick={go} short />
+        </nav>
+
+        {settingsOpen && (
+          <Sheet title="Settings" onClose={() => setSettingsOpen(false)}>
+            <SettingsPanel
+              settings={household.settings}
+              onSaved={(saved) => {
+                setSettings(saved);
+                notify("Settings saved");
+              }}
+            />
+          </Sheet>
+        )}
+
+        {offersOpen && (
+          <Sheet title="Tilbudsavis" wide onClose={() => setOffersOpen(false)}>
+            <Offers />
+          </Sheet>
+        )}
+
+        {toast && (
+          <div className="toast" role="status" key={toast.id}>
+            <span>✓ {toast.message}</span>
+            {toast.action && (
+              <button
+                className="toast-action"
+                onClick={() => {
+                  toast.action!.run();
+                  setToast(null);
+                }}
+              >
+                {toast.action.label}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </HouseholdContext.Provider>
   );
 }
-
-const shellStyle: React.CSSProperties = {
-  fontFamily: "system-ui",
-  padding: "2rem",
-  display: "grid",
-  gap: "1rem",
-  justifyItems: "start",
-};
