@@ -454,7 +454,7 @@ export function Fridge() {
             Dishes that use them
           </button>
           <button className="btn primary" onClick={() => go("plan")}>
-            Plan a week
+            My week
           </button>
         </div>
       )}

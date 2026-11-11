@@ -154,9 +154,9 @@ def test_list_is_shared_and_survives_a_restart(make_client, data_dir: Path) -> N
     assert row["totalQuantity"] == "1 kg"
 
 
-def test_shopping_list_json_has_no_ticked_field(client, data_dir: Path) -> None:
+def test_shopping_list_json_has_no_ticked_field(client, household_dir: Path) -> None:
     _add(client, [{"name": "Eggs", "quantity": "6", "source": None}])
-    raw = (data_dir / "shopping_list.json").read_text(encoding="utf-8")
+    raw = (household_dir / "shopping_list.json").read_text(encoding="utf-8")
     assert "ticked" not in raw
     stored = json.loads(raw)
     for item in stored["items"]:

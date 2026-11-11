@@ -5,8 +5,14 @@ A household tool that turns fridge contents, standing preferences, and a persona
 ## Language
 
 **Household**:
-The single local install of the app, shared by everyone living there. Owns everything: one set of PlanningSettings, the Dish library, the Fridge, the ShoppingList and every PlanningRun. There are no per-person profiles or logins.
-_Avoid_: Profile, user, account (per-person profiles existed early on and were removed; nothing is per person)
+The people who plan and shop together, and everything they share: one set of PlanningSettings, the Dish library, the Fridge, My week, the ShoppingList, every PlanningRun, the model settings and its Appearance. Users sign in, but nothing is per person — a user belongs to exactly one Household and sees all of it. Someone signing up on their own starts a new Household; one signing up through an Invite link joins the inviter's.
+_Avoid_: Profile (per-person planning profiles existed early on and were removed), account (ambiguous with the user)
+
+**Invite link**:
+A link (`/?invite=<token>`) any member makes to bring someone into their Household. Works for a week, for anyone it's sent to, until revoked. Signing up through it joins the Household; a signed-in user opening it is asked whether to move.
+
+**Appearance**:
+How a Household has personalised the app: a name in the header, a mark (emoji) beside it, an accent colour. Empty means the app's own look.
 
 **Dish**:
 An entry in the Household's shared library of meals the person likes to make — by definition a *known dish*. Has a title, and optional (+) details: ingredients, recipe/instructions, and recipe variants (substitutes). Can carry Tags.

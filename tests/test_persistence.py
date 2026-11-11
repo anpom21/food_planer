@@ -40,16 +40,19 @@ def test_state_survives_a_restart(make_client, data_dir: Path) -> None:
     assert dishes[0]["favourite"] is True
 
 
-def test_data_layout_is_created_on_first_run(client, data_dir: Path) -> None:
-    # Creating the app (via the client fixture) lays down the directory shape.
-    assert (data_dir / "fridge_images").is_dir()
+def test_data_layout_is_created_on_first_run(
+    client, data_dir: Path, household_dir: Path
+) -> None:
+    # Signing up (via the client fixture) lays down the directory shape: the
+    # user's own household, and the shared shop logos at the top of data/.
+    assert (household_dir / "fridge_images").is_dir()
     assert (data_dir / "icons").is_dir()
     # A write materialises the entity's JSON file atomically.
     client.post("/api/dishes", json={"title": "Grød"})
-    assert (data_dir / "dishes.json").is_file()
+    assert (household_dir / "dishes.json").is_file()
 
 
-def test_every_entity_file_exists_on_first_run(client, data_dir: Path) -> None:
+def test_every_entity_file_exists_on_first_run(client, household_dir: Path) -> None:
     # data/ holds one JSON file per entity type immediately after first run —
     # not only once a write happens to touch it (acceptance criterion #2).
     import json
@@ -57,7 +60,7 @@ def test_every_entity_file_exists_on_first_run(client, data_dir: Path) -> None:
     from food_planer.store import ENTITY_DEFAULTS
 
     for name, default in ENTITY_DEFAULTS.items():
-        path = data_dir / f"{name}.json"
+        path = household_dir / f"{name}.json"
         assert path.is_file(), f"{name}.json should exist on first run"
         assert json.loads(path.read_text(encoding="utf-8")) == default
 

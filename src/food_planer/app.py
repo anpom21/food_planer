@@ -18,7 +18,8 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from typing import Literal
@@ -36,12 +37,23 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .accounts import (
+    SESSION_COOKIE,
+    SESSION_MAX_AGE,
+    AccountError,
+    Accounts,
+    household_of,
+    public_invite,
+    public_user,
+)
 from .clients import (
+    DEFAULT_CLAUDE_MODEL,
+    ConfiguredLLMClient,
     LLMResult,
     OpenAIClient,
-    RealOpenAIClient,
     RealTjekClient,
     TjekClient,
+    claude_code_status,
 )
 from .discounts import (
     MAX_PROMPT_OFFERS,
@@ -75,6 +87,7 @@ from .planning import (
     planning_json_schema,
     prompt_values,
     render_prompt_segments,
+    resolve_model,
     unknown_variables,
 )
 from .recipes import load_all_recipes
@@ -102,6 +115,8 @@ from .store import Store, new_id
 
 log = logging.getLogger("food_planer.planning")
 
+INVITE_GONE = "This invite link has expired or been revoked — ask for a new one"
+
 # A generous ceiling for the single planning call; hitting it triggers the
 # one truncation retry with days and suggestions-per-day halved.
 PLANNING_MAX_OUTPUT_TOKENS = 8000
@@ -122,12 +137,32 @@ FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "di
 # get_openai_client / get_tjek_client via app.dependency_overrides.
 
 
-def get_store(request: Request) -> Store:
-    return request.app.state.store
+def current_user(request: Request) -> dict:
+    """The signed-in user, from the session cookie; 401 without one."""
+    user = request.app.state.accounts.user_for(request.cookies.get(SESSION_COOKIE))
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    return user
 
 
-def get_openai_client(request: Request) -> OpenAIClient:
-    return request.app.state.openai_client
+def get_store(request: Request, user: dict = Depends(current_user)) -> Store:
+    """The signed-in user's household, shared with everyone in it."""
+    return request.app.state.accounts.store_for(user)
+
+
+def get_openai_client(
+    request: Request,
+    store: Store = Depends(get_store),
+    user: dict = Depends(current_user),
+) -> OpenAIClient:
+    if request.app.state.openai_client is not None:
+        return request.app.state.openai_client
+    # Only the owner's household may fall back on the server's own OpenAI key
+    # and Claude Code login; anyone else brings their own in Settings → Model.
+    return ConfiguredLLMClient(
+        store["model"].read,
+        machine_credentials=request.app.state.accounts.uses_server_credentials(user),
+    )
 
 
 def get_tjek_client(request: Request) -> TjekClient:
@@ -179,6 +214,69 @@ class PlanningSettings(BaseModel):
     recipeMode: Literal["only", "mix", "none"] = "mix"
 
 
+class ModelSettings(BaseModel):
+    """Which model plans, scans and reviews (Settings → Model). Secrets never
+    leave the backend: the response only says whether one is set."""
+
+    provider: Literal["openai", "claude-code"] = "openai"
+    openaiModel: str | None = None
+    claudeModel: str | None = None
+
+
+class ModelSettingsIn(ModelSettings):
+    # null keeps the stored secret, "" removes it, anything else replaces it.
+    openaiApiKey: str | None = None
+    claudeToken: str | None = None
+
+
+class ModelSettingsOut(ModelSettings):
+    openaiKeySet: bool
+    openaiKeyHint: str | None  # the key's last four characters
+    openaiKeyFromEnv: bool  # OPENAI_API_KEY is set, used when no key is saved
+    defaultOpenaiModel: str
+    defaultClaudeModel: str
+    claudeTokenSet: bool
+    # Not the server's owner: the server's own key and Claude Code login are
+    # off limits, so a key or token of their own is needed.
+    usesOwnCredentialsOnly: bool
+
+
+class Credentials(BaseModel):
+    username: str
+    # Optional: a user can choose to have none.
+    password: str | None = None
+
+
+class SignupIn(Credentials):
+    # The token from an invite link: the new user joins that household
+    # instead of starting one of their own.
+    invite: str | None = None
+
+
+class JoinIn(BaseModel):
+    invite: str
+
+
+# A colour as the frontend's accent: #rrggbb.
+HEX_COLOUR = r"^#[0-9a-fA-F]{6}$"
+
+
+class Appearance(BaseModel):
+    """How the household has made the app its own (Settings → Personalize):
+    a name in the header, a mark next to it, an accent colour. null keeps the
+    app's own — "Food Planner", the carrot, its orange."""
+
+    name: str | None = Field(default=None, max_length=40)
+    emoji: str | None = Field(default=None, max_length=16)
+    accent: str | None = Field(default=None, pattern=HEX_COLOUR)
+
+
+class PasswordChange(BaseModel):
+    currentPassword: str | None = None
+    # null removes the password.
+    newPassword: str | None = None
+
+
 class ShoppingSource(BaseModel):
     suggestionTitle: str
     kind: str
@@ -216,15 +314,20 @@ class RemindersExportIn(BaseModel):
 
 
 class SettingsOverride(BaseModel):
-    """The just-for-this-run adjustment behind the settings chip.
+    """The just-for-this-run settings from the Suggest dishes sheet.
 
     Applied on top of the household's saved PlanningSettings for a single run
-    and never written back — the saved defaults survive untouched.
+    and never written back — the saved defaults survive untouched. Any field
+    left out keeps its saved value.
     """
 
-    daysToPlan: int
-    suggestionsPerDay: int
-    knownVsUnknownBias: float
+    daysToPlan: int | None = None
+    suggestionsPerDay: int | None = None
+    knownVsUnknownBias: float | None = None
+    priority: list[str] | None = None
+    shops: list[str] | None = None
+    inspiration: str | None = None
+    recipeMode: Literal["only", "mix", "none"] | None = None
 
 
 class PlanningRunIn(BaseModel):
@@ -264,6 +367,34 @@ class Suggestion(BaseModel):
     # still shows them after they expire.
     discounts: list[dict] = Field(default_factory=list)
     recipe: SuggestionRecipe | None = None
+
+
+class MyWeekIn(BaseModel):
+    """A dish chosen for a week: a Suggestion snapshot — a planned dish, a
+    library Dish or an imported recipe, all shaped alike. ``week`` is the
+    Monday of the week it goes in (``2026-10-26``); omitted, this week."""
+
+    suggestion: Suggestion
+    week: str | None = None
+
+
+class MyWeekEntry(BaseModel):
+    id: str
+    week: str  # the Monday of its week, ISO date
+    addedAt: str
+    suggestion: Suggestion
+
+
+class MyWeekAdded(BaseModel):
+    entry: MyWeekEntry
+    # False when the week already had a dish by that title: it's returned
+    # as is, so pressing + twice never lists a dish twice.
+    created: bool
+
+
+class MyWeekOut(BaseModel):
+    currentWeek: str  # the Monday of this week, in Danish time
+    entries: list[MyWeekEntry]  # every week, oldest first
 
 
 class DayPlan(BaseModel):
@@ -411,11 +542,51 @@ def _settings(store: Store) -> dict:
     return PlanningSettings(**store["settings"].read()).model_dump()
 
 
+# Weeks run Monday to Sunday in Danish time, whatever the server's zone.
+_HOUSEHOLD_TZ = ZoneInfo("Europe/Copenhagen")
+
+
+def current_week() -> str:
+    """The Monday of this week, as an ISO date."""
+    today = datetime.now(_HOUSEHOLD_TZ).date()
+    return (today - timedelta(days=today.weekday())).isoformat()
+
+
+def _week_key(week: str | None) -> str:
+    """A requested week as its Monday; 422 for anything that isn't one."""
+    if week is None:
+        return current_week()
+    try:
+        monday = date.fromisoformat(week)
+    except ValueError:
+        monday = None
+    if monday is None or monday.weekday() != 0:
+        raise HTTPException(status_code=422, detail="week must be a Monday (YYYY-MM-DD)")
+    return monday.isoformat()
+
+
+def _model_settings(store: Store, server_credentials: bool) -> dict:
+    """The model settings as the API shows them, without the secrets."""
+    stored = store["model"].read()
+    key = stored.get("openaiApiKey")
+    return {
+        **ModelSettings(**stored).model_dump(),
+        "openaiKeySet": bool(key),
+        "openaiKeyHint": key[-4:] if key else None,
+        # The server's own key, which only the owner's household may use.
+        "openaiKeyFromEnv": server_credentials and bool(os.environ.get("OPENAI_API_KEY")),
+        "usesOwnCredentialsOnly": not server_credentials,
+        "defaultOpenaiModel": resolve_model(),
+        "defaultClaudeModel": DEFAULT_CLAUDE_MODEL,
+        "claudeTokenSet": bool(stored.get("claudeToken")),
+    }
+
+
 def _adopt_profile_settings(store: Store) -> None:
     """One-off migration from the per-profile era: a household with no saved
     settings yet takes the first profile's from ``profiles.json`` that has
     any. The old file is left on disk untouched; an unreadable one is skipped."""
-    legacy = store.data_dir / "profiles.json"
+    legacy = store.shared_dir / "profiles.json"
     if store["settings"].read() or not legacy.exists():
         return
     try:
@@ -438,20 +609,172 @@ def create_app(
     tjek_client: TjekClient | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Food Planner")
-    app.state.store = Store(data_dir)
-    _adopt_profile_settings(app.state.store)
-    app.state.openai_client = openai_client or RealOpenAIClient()
+    # Users and their households; the first user to sign up takes over a
+    # household that predates users, adopting legacy profile settings too.
+    app.state.accounts = Accounts(data_dir, on_first_user=_adopt_profile_settings)
+    # None: each request builds one from the signed-in user's model settings.
+    app.state.openai_client = openai_client
     app.state.tjek_client = tjek_client or RealTjekClient()
     app.state.offer_catalog = OfferCatalog()
     # Chains whose logo has been tried this run, so a chain Tjek has no logo
     # for isn't asked again on every page load.
     app.state.logo_attempts = set()
 
-    api = APIRouter(prefix="/api")
+    # Open to anyone: the health check and signing in. Everything else under
+    # /api needs a session.
+    public = APIRouter(prefix="/api")
+    api = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
-    @api.get("/health")
+    @public.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    # --- Accounts: sign up, sign in, sign out --------------------------------
+
+    def _signed_in(response: Response, token: str, request: Request) -> None:
+        response.set_cookie(
+            SESSION_COOKIE,
+            token,
+            max_age=SESSION_MAX_AGE,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https",
+        )
+
+    @public.post("/auth/signup", status_code=201)
+    async def signup(body: SignupIn, request: Request, response: Response) -> dict:
+        accounts: Accounts = request.app.state.accounts
+        household_id = None
+        if body.invite is not None:
+            invite = accounts.invite_for(body.invite)
+            if invite is None:
+                raise HTTPException(status_code=410, detail=INVITE_GONE)
+            household_id = invite["householdId"]
+        try:
+            user = await accounts.create(body.username, body.password, household_id)
+        except AccountError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _signed_in(response, await accounts.start_session(user["id"]), request)
+        return public_user(user)
+
+    @public.post("/auth/login")
+    async def login(body: Credentials, request: Request, response: Response) -> dict:
+        accounts: Accounts = request.app.state.accounts
+        user = accounts.find(body.username)
+        if not accounts.verify(user, body.password):
+            # One message for a wrong name and a wrong password alike.
+            raise HTTPException(status_code=401, detail="Wrong username or password")
+        _signed_in(response, await accounts.start_session(user["id"]), request)
+        return public_user(user)
+
+    @public.post("/auth/logout", status_code=204)
+    async def logout(request: Request, response: Response) -> None:
+        await request.app.state.accounts.end_session(request.cookies.get(SESSION_COOKIE))
+        response.delete_cookie(SESSION_COOKIE)
+
+    @public.get("/auth/me")
+    def me(user: dict = Depends(current_user)) -> dict:
+        return public_user(user)
+
+    # --- The household: who's in it, invite links, how it looks ------------
+
+    def _household_name(accounts: Accounts, household_id: str) -> str:
+        appearance = accounts.store_for({"id": household_id})["appearance"].read()
+        if appearance.get("name"):
+            return appearance["name"]
+        founder = accounts.get(household_id)
+        return f"{founder['username']}'s household" if founder else "a household"
+
+    @public.get("/invites/{token}")
+    def check_invite(token: str, request: Request) -> dict:
+        """What the sign-up screen shows someone opening an invite link: whose
+        household they're about to join. 410 once the link is no good."""
+        accounts: Accounts = request.app.state.accounts
+        invite = accounts.invite_for(token)
+        if invite is None:
+            raise HTTPException(status_code=410, detail=INVITE_GONE)
+        return {
+            "householdName": _household_name(accounts, invite["householdId"]),
+            "invitedBy": invite["createdBy"],
+            "expiresAt": invite["expiresAt"],
+        }
+
+    def _household(accounts: Accounts, user: dict) -> dict:
+        household_id = household_of(user)
+        return {
+            "id": household_id,
+            "name": _household_name(accounts, household_id),
+            "members": [
+                {"id": u["id"], "username": u["username"]}
+                for u in accounts.members(household_id)
+            ],
+            "invites": [public_invite(i) for i in accounts.invites_of(household_id)],
+        }
+
+    @api.get("/household")
+    def get_household(request: Request, user: dict = Depends(current_user)) -> dict:
+        return _household(request.app.state.accounts, user)
+
+    @api.post("/household/invites", status_code=201)
+    async def create_invite(request: Request, user: dict = Depends(current_user)) -> dict:
+        """A new invite link. Anyone in the household may make one; the token
+        comes back this once and is only kept as a digest."""
+        token, invite = await request.app.state.accounts.create_invite(user)
+        return {"token": token, **public_invite(invite)}
+
+    @api.delete("/household/invites/{invite_id}", status_code=204)
+    async def revoke_invite(
+        invite_id: str, request: Request, user: dict = Depends(current_user)
+    ) -> None:
+        try:
+            await request.app.state.accounts.revoke_invite(household_of(user), invite_id)
+        except AccountError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @api.post("/household/join")
+    async def join_household(
+        body: JoinIn, request: Request, user: dict = Depends(current_user)
+    ) -> dict:
+        """A signed-in user opening an invite link moves into that household.
+        Their old one isn't deleted — it stays with anyone else in it."""
+        accounts: Accounts = request.app.state.accounts
+        invite = accounts.invite_for(body.invite)
+        if invite is None:
+            raise HTTPException(status_code=410, detail=INVITE_GONE)
+        if invite["householdId"] == household_of(user):
+            raise HTTPException(status_code=409, detail="You're already in this household")
+        return public_user(await accounts.join(user["id"], invite["householdId"]))
+
+    @api.get("/household/appearance", response_model=Appearance)
+    def get_appearance(store: Store = Depends(get_store)) -> dict:
+        return Appearance(**store["appearance"].read()).model_dump()
+
+    @api.put("/household/appearance", response_model=Appearance)
+    async def save_appearance(body: Appearance, store: Store = Depends(get_store)) -> dict:
+        # Blank text means "the app's own", same as null.
+        cleaned = Appearance(
+            name=(body.name or "").strip() or None,
+            emoji=(body.emoji or "").strip() or None,
+            accent=body.accent,
+        ).model_dump()
+        await store["appearance"].update(lambda stored: (stored.clear(), stored.update(cleaned)))
+        return cleaned
+
+    @api.put("/auth/password")
+    async def change_password(
+        body: PasswordChange, request: Request, user: dict = Depends(current_user)
+    ) -> dict:
+        """Set, change or remove the password. A user who has one must give it
+        first; their other devices are signed out afterwards."""
+        accounts: Accounts = request.app.state.accounts
+        if user.get("passwordHash") and not accounts.verify(user, body.currentPassword):
+            raise HTTPException(status_code=403, detail="The current password is wrong")
+        try:
+            updated = await accounts.set_password(user["id"], body.newPassword)
+        except AccountError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        await accounts.end_other_sessions(user["id"], request.cookies.get(SESSION_COOKIE))
+        return public_user(updated)
 
     # --- Settings: the household's planning preferences, one set ----------
 
@@ -472,6 +795,52 @@ def create_app(
             return stored
 
         return await store["settings"].update(replace)
+
+    # --- Model: which LLM the planner runs on, and its credentials ---------
+
+    @api.get("/model", response_model=ModelSettingsOut)
+    def get_model_settings(
+        request: Request,
+        store: Store = Depends(get_store),
+        user: dict = Depends(current_user),
+    ) -> dict:
+        return _model_settings(store, request.app.state.accounts.uses_server_credentials(user))
+
+    @api.put("/model", response_model=ModelSettingsOut)
+    async def save_model_settings(
+        body: ModelSettingsIn,
+        request: Request,
+        store: Store = Depends(get_store),
+        user: dict = Depends(current_user),
+    ) -> dict:
+        def apply(stored: dict) -> dict:
+            stored.update(body.model_dump(include={"provider", "openaiModel", "claudeModel"}))
+            for secret in ("openaiApiKey", "claudeToken"):
+                value = getattr(body, secret)
+                if value is not None:
+                    stored[secret] = value.strip() or None
+            return stored
+
+        await store["model"].update(apply)
+        return _model_settings(store, request.app.state.accounts.uses_server_credentials(user))
+
+    @api.get("/model/claude-status")
+    async def get_claude_status(
+        request: Request,
+        store: Store = Depends(get_store),
+        user: dict = Depends(current_user),
+    ) -> dict:
+        """Whether Claude Code can run the planner: installed, and signed in
+        with a subscription or given a token. Only the owner's household may
+        use the server's own Claude Code login; anyone else needs a token."""
+        token = store["model"].read().get("claudeToken")
+        if not token and not request.app.state.accounts.uses_server_credentials(user):
+            return {"installed": True, "loggedIn": False, "needsToken": True}
+        try:
+            return await claude_code_status(token)
+        except Exception as exc:
+            log.warning("claude auth status failed: %s", exc)
+            return {"installed": True, "loggedIn": False, "error": str(exc)}
 
     @api.get("/dishes", response_model=list[Dish])
     def list_dishes(store: Store = Depends(get_store)) -> list[dict]:
@@ -814,7 +1183,7 @@ def create_app(
         week's food offers, best first. Matched against every food offer at
         the preferred shops, not just the capped list the model sees."""
         return match_dinner_recipes(
-            load_all_recipes(store.data_dir), fridge, food_offers, limit=limit
+            load_all_recipes(store.shared_dir), fridge, food_offers, limit=limit
         )
 
     # --- The planning prompt: one household-wide, editable template ---------
@@ -912,8 +1281,13 @@ def create_app(
         # The override lives on top of the saved settings for this run only; it
         # is never persisted back.
         settings = _settings(store)
-        if body.settingsOverride is not None:
-            settings.update(body.settingsOverride.model_dump())
+        override = (
+            body.settingsOverride.model_dump(exclude_none=True)
+            if body.settingsOverride is not None
+            else None
+        )
+        if override:
+            settings.update(override)
 
         dishes = store["dishes"].read()
         requested_days = settings["daysToPlan"]
@@ -925,16 +1299,14 @@ def create_app(
         trace: dict = {
             "runId": run_id,
             "settings": settings,
-            "settingsOverride": (
-                body.settingsOverride.model_dump() if body.settingsOverride else None
-            ),
+            "settingsOverride": override,
             "dishCount": len(dishes),
             "calls": [],
         }
         log.info(
             "run %s: planning with settings %s%s",
             run_id, json.dumps(settings, ensure_ascii=False),
-            " (per-run override applied)" if body.settingsOverride else "",
+            " (per-run override applied)" if override else "",
         )
 
         offer_limit = _offer_limit(store)
@@ -1144,6 +1516,49 @@ def create_app(
                 return run
         raise HTTPException(status_code=404, detail="Planning run not found")
 
+    # --- My week: the dishes chosen for each week ---------------------------
+
+    @api.get("/my-week", response_model=MyWeekOut)
+    def get_my_week(store: Store = Depends(get_store)) -> dict:
+        return {"currentWeek": current_week(), "entries": store["my_week"].read()["entries"]}
+
+    @api.post("/my-week", response_model=MyWeekAdded)
+    async def add_to_my_week(
+        body: MyWeekIn, response: Response, store: Store = Depends(get_store)
+    ) -> dict:
+        week = _week_key(body.week)
+        title = body.suggestion.title.strip().lower()
+
+        def add(state: dict) -> dict:
+            for entry in state["entries"]:
+                if entry["week"] == week and entry["suggestion"]["title"].strip().lower() == title:
+                    return {"entry": entry, "created": False}
+            entry = {
+                "id": new_id(),
+                "week": week,
+                "addedAt": datetime.now(timezone.utc).isoformat(),
+                "suggestion": body.suggestion.model_dump(),
+            }
+            state["entries"].append(entry)
+            return {"entry": entry, "created": True}
+
+        added = await store["my_week"].update(add)
+        response.status_code = 201 if added["created"] else 200
+        return added
+
+    @api.delete("/my-week/{entry_id}", status_code=204)
+    async def remove_from_my_week(
+        entry_id: str, store: Store = Depends(get_store)
+    ) -> None:
+        def remove(state: dict) -> None:
+            for i, entry in enumerate(state["entries"]):
+                if entry["id"] == entry_id:
+                    del state["entries"][i]
+                    return
+            raise HTTPException(status_code=404, detail="Not in my week")
+
+        await store["my_week"].update(remove)
+
     # --- Recipes: imported from recipe websites by `food-planer-recipes` ----
     # Read-only here; the scraper owns data/recipes/<site>.json.
 
@@ -1156,7 +1571,7 @@ def create_app(
         """Every imported recipe as a card, with this week's offers at the
         household's shops."""
         food_offers = await _household_offers(store, tjek, catalog)
-        recipes = load_all_recipes(store.data_dir)
+        recipes = load_all_recipes(store.shared_dir)
         on_hand = OnHand.from_fridge(store["fridge"].read())
         matched = {m.recipe["url"]: m for m in match_recipes(recipes, on_hand, food_offers)}
         return [recipe_card(r, matched.get(r["url"]), on_hand) for r in recipes]
@@ -1206,7 +1621,7 @@ def create_app(
         """Download the logo of every chain that has none yet, from its Tjek
         dealer, into data/icons/. Each chain is tried once per run; a chain
         Tjek doesn't carry (or a failed download) keeps its initials badge."""
-        icons = store.data_dir / "icons"
+        icons = store.shared_dir / "icons"
         missing = [
             name
             for name in DANISH_CHAINS
@@ -1247,13 +1662,13 @@ def create_app(
         # Logos come from the chains' Tjek dealers the first time they're
         # needed; anything already in data/icons/ (or dropped in by hand) wins.
         await _fetch_missing_logos(store, tjek, catalog, request.app.state.logo_attempts)
-        return shop_catalog(store.data_dir / "icons")
+        return shop_catalog(store.shared_dir / "icons")
 
     @api.get("/shops/{slug}/icon")
     def get_shop_icon(
         slug: str, store: Store = Depends(get_store)
     ) -> FileResponse:
-        path = icon_path(store.data_dir / "icons", slug)
+        path = icon_path(store.shared_dir / "icons", slug)
         if path is None:
             raise HTTPException(status_code=404, detail="Shop icon not found")
         return FileResponse(path)
@@ -1282,6 +1697,7 @@ def create_app(
             ) from exc
         return {"shop": {"slug": slug, "name": name}, **result}
 
+    app.include_router(public)
     app.include_router(api)
 
     # Serve the built React shell same-origin, when it has been built.

@@ -263,7 +263,7 @@ export function ShoppingList() {
           </p>
           <div className="head-actions">
             <button className="btn primary" onClick={() => go("plan")}>
-              Plan a week
+              My week
             </button>
             <button className="btn" onClick={() => go("dishes")}>
               Browse dishes

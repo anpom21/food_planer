@@ -1,6 +1,14 @@
 import { useState } from "react";
-import { createDish, deleteDish, replaceDish, type Dish, type DishInput } from "./api";
+import {
+  createDish,
+  deleteDish,
+  dishAsSuggestion,
+  replaceDish,
+  type Dish,
+  type DishInput,
+} from "./api";
 import { DishEditor } from "./DishEditor";
+import { AddToWeekButton } from "./PlatePlus";
 
 // The household's own Dish library (issue #18), as one view of the Dishes tab.
 // Adding a dish takes a title and five seconds; everything else is optional
@@ -37,10 +45,13 @@ export function MyDishes({
   dishes,
   query,
   onChange,
+  onAddIngredients,
 }: {
   dishes: Dish[];
   query: string;
   onChange: (dishes: Dish[]) => void;
+  // Review this dish's ingredients for the shopping list (and My week).
+  onAddIngredients: (dish: Dish) => void;
 }) {
   const [editing, setEditing] = useState<EditorTarget>(null);
 
@@ -95,6 +106,7 @@ export function MyDishes({
                 }
               }}
             >
+              <AddToWeekButton suggestion={dishAsSuggestion(dish)} className="card-plate" />
               <button
                 className="card-delete"
                 title="Delete"
@@ -121,6 +133,15 @@ export function MyDishes({
           dish={editing === "new" ? null : editing}
           onSave={handleSave}
           onCancel={() => setEditing(null)}
+          onAddIngredients={
+            editing === "new"
+              ? undefined
+              : () => {
+                  const dish = editing;
+                  setEditing(null);
+                  onAddIngredients(dish);
+                }
+          }
         />
       )}
     </>

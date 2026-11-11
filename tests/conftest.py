@@ -7,7 +7,9 @@ fixtures are established here (see ``spec.md`` → "Testing Decisions"):
 - ``fake_openai`` — a scriptable fake OpenAI client
 - ``fake_tjek``   — a fake Tjek client returning canned payloads
 - ``client``      — a ``TestClient`` with both fakes wired via
-  ``dependency_overrides``
+  ``dependency_overrides``, signed in as the household's (only) user
+
+``household_dir`` is where that user's own files live, ``data/users/<id>/``.
 
 Later tests should be able to start from these and add nothing.
 """
@@ -16,6 +18,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Iterator
+
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -40,11 +44,15 @@ def fake_tjek() -> FakeTjekClient:
     return FakeTjekClient()
 
 
+TEST_USER = "household"
+
+
 @pytest.fixture
 def make_client(
     fake_openai: FakeOpenAIClient, fake_tjek: FakeTjekClient
 ):
-    """Build a ``TestClient`` bound to a given ``data/`` directory.
+    """Build a ``TestClient`` bound to a given ``data/`` directory, signed in
+    as TEST_USER (created on first use, a user without a password).
 
     Exposed so a test can rebuild a second app against the same directory to
     prove state survives a restart.
@@ -52,7 +60,7 @@ def make_client(
 
     clients: list[TestClient] = []
 
-    def _make(directory: Path) -> TestClient:
+    def _make(directory: Path, signed_in: bool = True) -> TestClient:
         app = create_app(
             data_dir=directory,
             openai_client=fake_openai,
@@ -62,6 +70,10 @@ def make_client(
         app.dependency_overrides[get_tjek_client] = lambda: fake_tjek
         tc = TestClient(app)
         clients.append(tc)
+        if signed_in:
+            creds = {"username": TEST_USER}
+            if tc.post("/api/auth/signup", json=creds).status_code != 201:
+                assert tc.post("/api/auth/login", json=creds).status_code == 200
         return tc
 
     yield _make
@@ -74,3 +86,11 @@ def make_client(
 def client(make_client, data_dir: Path) -> Iterator[TestClient]:
     """A ready-to-use ``TestClient`` against a temp ``data/``."""
     yield make_client(data_dir)
+
+
+@pytest.fixture
+def household_dir(client, data_dir: Path) -> Path:
+    """The signed-in test user's own directory, ``data/users/<id>/``."""
+    users = json.loads((data_dir / "users.json").read_text("utf-8"))
+    user = next(u for u in users if u["username"] == TEST_USER)
+    return data_dir / "users" / user["id"]

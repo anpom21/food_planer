@@ -38,9 +38,19 @@ ENTITY_DEFAULTS: dict[str, Any] = {
     # added before so the common-items list learns the household's habits.
     "fridge": {"items": [], "history": []},
     "shopping_list": {"items": []},
+    # My week: the dishes chosen per week, each a Suggestion snapshot filed
+    # under the Monday of its week. Old weeks stay, to look back through.
+    "my_week": {"entries": []},
     # The household's edited planning prompt and how many offers it carries;
     # null means the built-in default for either.
     "prompt": {"template": None, "offerLimit": None},
+    # Which model the planner runs on and its credentials (Settings → Model):
+    # the provider ("openai" / "claude-code"), each one's model, an OpenAI API
+    # key and a Claude Code token. null means the default / the environment.
+    "model": {},
+    # How the household has personalised the app: its name, mark and accent
+    # colour (Settings → Personalize). Empty means the app's own look.
+    "appearance": {},
 }
 
 
@@ -120,14 +130,22 @@ class JsonFile:
 
 
 class Store:
-    """The collection of JSON files that make up the household's state."""
+    """The collection of JSON files that make up one household's state."""
 
-    def __init__(self, data_dir: str | os.PathLike[str]) -> None:
+    def __init__(
+        self,
+        data_dir: str | os.PathLike[str],
+        shared_dir: str | os.PathLike[str] | None = None,
+    ) -> None:
+        # data_dir is one household's (a user's); shared_dir holds what every
+        # household reads alike — imported recipes and shop logos. A store on
+        # its own (no users) keeps both in one place.
         self.data_dir = Path(data_dir)
+        self.shared_dir = Path(shared_dir) if shared_dir is not None else self.data_dir
         self.data_dir.mkdir(parents=True, exist_ok=True)
         # data/ is no longer JSON-only: it also holds image binaries (ADR 0002).
         (self.data_dir / "fridge_images").mkdir(exist_ok=True)
-        (self.data_dir / "icons").mkdir(exist_ok=True)
+        (self.shared_dir / "icons").mkdir(parents=True, exist_ok=True)
         self._files: dict[str, JsonFile] = {
             name: JsonFile(self.data_dir / f"{name}.json", default)
             for name, default in ENTITY_DEFAULTS.items()

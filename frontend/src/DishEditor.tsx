@@ -10,13 +10,16 @@ type Props = {
   dish: Dish | null; // null = creating a new Dish
   onSave: (input: DishInput) => Promise<void>;
   onCancel: () => void;
+  // An existing dish gets "+ Ingredients" at the bottom: its saved ingredient
+  // lines go to the shopping list review, and the dish into My week.
+  onAddIngredients?: () => void;
 };
 
 function hasAnyDetail(dish: Dish | null): boolean {
   return !!(dish && (dish.ingredients || dish.substitutes || dish.recipe));
 }
 
-export function DishEditor({ dish, onSave, onCancel }: Props) {
+export function DishEditor({ dish, onSave, onCancel, onAddIngredients }: Props) {
   const [title, setTitle] = useState(dish?.title ?? "");
   const [ingredients, setIngredients] = useState(dish?.ingredients ?? "");
   const [substitutes, setSubstitutes] = useState(dish?.substitutes ?? "");
@@ -126,6 +129,20 @@ export function DishEditor({ dish, onSave, onCancel }: Props) {
         )}
 
         <div className="modal-actions">
+          {onAddIngredients && (
+            <button
+              className="btn add-ingredients-left"
+              onClick={onAddIngredients}
+              disabled={!dish?.ingredients?.trim()}
+              title={
+                dish?.ingredients?.trim()
+                  ? "Add the saved ingredients to the shopping list"
+                  : "Write down some ingredients first"
+              }
+            >
+              + Ingredients
+            </button>
+          )}
           <button className="btn ghost" onClick={onCancel}>
             Cancel
           </button>

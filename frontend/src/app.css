@@ -5,6 +5,8 @@
   --ink-soft: #6b625a;
   --line: #e7dfd3;
   --accent: #c1592b;
+  /* A dish that's in this week's My week (the filled plate). */
+  --in-week: #2e9e5b;
   --favourite: #d98c1f;
   --radius: 10px;
   --shadow: 0 1px 2px rgba(44, 38, 34, 0.06), 0 4px 14px rgba(44, 38, 34, 0.06);
@@ -76,7 +78,7 @@ body {
 }
 
 .btn.primary:hover {
-  background: #a84a22;
+  background: color-mix(in srgb, var(--accent) 85%, #000);
 }
 
 .btn.primary:disabled {
@@ -660,7 +662,7 @@ body {
 }
 .sugg-card.selectable.on {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(193, 89, 43, 0.18);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 /* Filled green check circle on the card's top-right corner. */
@@ -1115,7 +1117,7 @@ body {
 }
 
 .prompt-text::selection {
-  background: rgba(193, 89, 43, 0.25);
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .prompt-text:focus {
@@ -1564,7 +1566,7 @@ body {
 }
 .mode-pill.on {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(193, 89, 43, 0.18);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .chip.recipe {
@@ -1584,4 +1586,716 @@ body {
 }
 .ing-group .ing-subhead {
   margin: 8px 10px 2px;
+}
+
+/* Settings → Model ---------------------------------------------------------- */
+.model-settings {
+  margin-top: 8px;
+}
+
+.model-fields {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.model-fields .field {
+  margin: 0;
+}
+
+.model-fields .field > label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.model-fields input,
+.model-fields select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 14px;
+  background: #fff;
+}
+
+.model-fields .link-btn {
+  margin-top: 6px;
+}
+
+.claude-login {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.claude-login p {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.ok-note {
+  color: #2f7a43;
+  font-weight: 600;
+}
+
+/* My week ------------------------------------------------------------------- */
+.plate-plus {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  line-height: 0;
+}
+
+.plate-plus:hover {
+  color: var(--accent);
+}
+
+.plate-plus:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.plate-plus-icon {
+  width: 22px;
+  height: 22px;
+}
+
+/* On a My dishes card: just left of the 🗑. */
+.card-plate {
+  position: absolute;
+  top: 6px;
+  right: 40px;
+  padding: 4px;
+  border-radius: 6px;
+}
+
+.card-plate:hover {
+  background: var(--bg, #f6f1ea);
+}
+
+.card .card-title {
+  margin-right: 64px;
+}
+
+/* In a suggestion's action row: a square icon button, not a stretched one. */
+.sugg-actions > .plate-plus.inline {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.my-week {
+  margin-bottom: 36px;
+}
+
+.my-week-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 20px;
+  margin-bottom: 16px;
+}
+
+.my-week-head h1 {
+  margin: 0 0 4px;
+}
+
+.my-week-head p {
+  margin: 0;
+}
+
+.week-nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.week-nav .icon-btn {
+  width: 36px;
+  height: 36px;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.week-nav .icon-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.week-nav-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 120px;
+  font-size: 14px;
+}
+
+.week-nav-label .muted {
+  font-size: 12px;
+}
+
+.week-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.week-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.week-card .sugg-title {
+  margin-right: 28px;
+}
+
+.week-card .sugg-actions {
+  margin-top: auto;
+  padding-top: 10px;
+}
+
+.week-card .sugg-actions .btn {
+  white-space: nowrap;
+}
+
+.modal-actions .btn:disabled,
+.week-card .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.week-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.week-remove:hover {
+  background: #fbeaea;
+  color: #b3261e;
+}
+
+.week-add {
+  min-height: 120px;
+}
+
+.planner-head {
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
+  margin-bottom: 12px;
+}
+
+.planner-head h2 {
+  margin: 0 0 4px;
+}
+
+.planner-head p {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.add-dish-search {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.add-dish-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.add-dish-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.add-dish-row:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.add-dish-row.added {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.add-dish-row img,
+.add-dish-noimg {
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+  display: grid;
+  place-items: center;
+  background: var(--line);
+  font-size: 22px;
+}
+
+.add-dish-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.add-dish-text strong,
+.add-dish-text .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.add-dish-text .muted {
+  font-size: 12.5px;
+}
+
+.add-dish-go {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+/* In the dish editor, "+ Ingredients" sits apart from Cancel/Save. */
+.modal-actions .add-ingredients-left {
+  margin-right: auto;
+}
+
+/* A My week card's photo: opens Details, which links to the recipe. */
+.week-thumb {
+  display: block;
+  width: calc(100% + 24px);
+  margin: -12px -12px 10px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  background: var(--line);
+  cursor: pointer;
+}
+
+.week-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.plate-plus.on,
+.plate-plus.on:hover {
+  color: var(--in-week);
+}
+
+/* Sign in -------------------------------------------------------------------- */
+.signin {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+  background: var(--bg);
+}
+
+.signin-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 28px 24px;
+}
+
+.signin-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.signin-brand .brand-mark {
+  font-size: 34px;
+}
+
+.signin-brand h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.signin-modes {
+  display: flex;
+  margin-bottom: 20px;
+}
+
+.signin-modes button {
+  flex: 1;
+}
+
+.signin-form .input {
+  width: 100%;
+  font-size: 16px; /* 16px stops iOS zooming into the field */
+}
+
+.signin-form .btn {
+  width: 100%;
+}
+
+.field-optional {
+  font-weight: 400;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.signin-note,
+.account-note {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  margin: 0 0 14px;
+}
+
+.field-caption.error {
+  margin: 4px 0 0;
+}
+
+/* Settings → Account */
+.account-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.account-row label {
+  margin-bottom: 4px;
+}
+
+.account-row p {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.account-password {
+  margin-top: 12px;
+}
+
+.account-password .input {
+  width: 100%;
+  font-size: 16px;
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-row .btn {
+  white-space: nowrap;
+}
+
+.own-credentials-note {
+  font-size: 13px;
+  margin: 12px 0 0;
+}
+
+/* A field label straight inside a card reads as a field, not a card title. */
+.settings-card > label.field {
+  font-weight: 400;
+  margin-bottom: 16px;
+}
+
+.settings-card .input {
+  width: 100%;
+  font-size: 16px; /* no iOS zoom */
+}
+
+.settings-heading {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+/* Settings: Household · Planning · Model */
+.settings-sections {
+  display: flex;
+}
+
+.settings-sections button {
+  flex: 1;
+  justify-content: center;
+}
+
+.settings-stack > .settings-card:last-child {
+  margin-bottom: 0;
+}
+
+/* Settings → Household: members and invite links */
+.member-list,
+.invite-list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+}
+
+.member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.member-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.invite-link {
+  display: grid;
+  gap: 10px;
+}
+
+.invite-link .account-note {
+  margin: 0;
+}
+
+.invite-list {
+  margin: 14px 0 0;
+  font-size: 13px;
+}
+
+.invite-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+
+/* Sign-in and the join prompt, opened from an invite link */
+.invite-banner {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #fbf7f1;
+  border: 1px solid var(--line);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.join-prompt p {
+  margin: 0 0 12px;
+}
+
+/* Settings → Personalize */
+.personalize-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 2px solid;
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.personalize-preview strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personalize-sample {
+  padding: 6px 12px;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.emoji-grid,
+.swatch-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.emoji-pick {
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.emoji-pick.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.settings-card .input.emoji-own {
+  width: 72px;
+  height: 44px;
+  text-align: center;
+}
+
+.swatch {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--line);
+  cursor: pointer;
+}
+
+.swatch.on {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+.swatch-own {
+  overflow: hidden;
+  background: conic-gradient(#e33, #ec3, #3c5, #3ae, #73e, #e3a, #e33);
+}
+
+.swatch-own input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* Settings → Install on your phone */
+.install-card .btn.primary {
+  margin-bottom: 14px;
+}
+
+.install-tabs {
+  display: flex;
+  margin-bottom: 4px;
+}
+
+.install-tabs button {
+  flex: 1;
+  justify-content: center;
+}
+
+.install-steps {
+  margin: 12px 0 0;
+  padding-left: 22px;
+  line-height: 1.55;
+  font-size: 14px;
+}
+
+.install-steps li {
+  margin-bottom: 6px;
+}
+
+.install-note {
+  font-size: 12.5px;
+  margin: 10px 0 0;
+}
+
+.inline-icon {
+  width: 16px;
+  height: 16px;
+  vertical-align: -3px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The priority list's ↑ ↓, for phones (where drag and drop doesn't reach) */
+.drag-list .rank-label {
+  flex: 1;
+}
+
+.rank-moves {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.rank-move {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.rank-move:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* The Suggest dishes sheet's bottom bar */
+.suggest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.keep-defaults {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto;
+  font-size: 14px;
+}
+
+.keep-defaults input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
 }

@@ -7,6 +7,11 @@ import {
   type PlanningSettings,
   type Shop,
 } from "./api";
+import { AccountCard } from "./AccountCard";
+import { HouseholdCard } from "./HouseholdCard";
+import { InstallCard } from "./InstallCard";
+import { PersonalizeCard } from "./Personalize";
+import { ModelSettingsCard } from "./ModelSettings";
 import { PromptEditor } from "./PromptEditor";
 
 // The Settings sheet, opened from the ⚙ in the header. The settled behavioural
@@ -264,63 +269,32 @@ const RECIPE_MODES: { mode: RecipeMode; label: string; hint: string }[] = [
   { mode: "none", label: "No online recipes", hint: "library and new dishes only" },
 ];
 
-// The household's planning settings, edited as a draft and saved together.
-export function PlanningSettingsForm({
-  settings,
-  onSaved,
+// The planning settings as a set of cards over a draft: days and the
+// known-vs-unknown lean, the priority order, shops, online recipes and
+// Inspiration. Shared by the Settings sheet (which saves them as the defaults)
+// and the Suggest dishes sheet (which plans with them).
+export function PlanningFields({
+  draft,
+  onChange,
 }: {
-  settings: PlanningSettings;
-  onSaved: (settings: PlanningSettings) => void;
+  draft: PlanningSettings;
+  onChange: (fields: Partial<PlanningSettings>) => void;
 }) {
-  // The draft is the working copy; nothing persists until Save. Starting from
-  // the stored settings means the form reflects what's on disk.
-  const [draft, setDraft] = useState<PlanningSettings>(settings);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
 
-  const patch = (fields: Partial<PlanningSettings>) => {
-    setDraft((prev) => ({ ...prev, ...fields }));
-    setSaved(false);
-  };
-
-  // Reorder by dragging: when a dragged row is moved over another, the two
-  // swap so the list settles into the person's chosen sequence. The saved
-  // order is exactly the four items as they end up here.
+  // Reorder by dragging (a mouse), or with the ↑ ↓ buttons (a phone, where
+  // HTML drag and drop doesn't reach). The saved order is exactly the four
+  // items as they end up here.
   const movePriority = (from: number, to: number) => {
-    if (from === to) return;
-    setDraft((prev) => {
-      const priority = [...prev.priority];
-      const [moved] = priority.splice(from, 1);
-      priority.splice(to, 0, moved);
-      return { ...prev, priority };
-    });
-    setSaved(false);
-  };
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const updated = await saveSettings(draft);
-      onSaved(updated);
-      setSaved(true);
-    } catch (e: unknown) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
+    if (from === to || to < 0 || to >= draft.priority.length) return;
+    const priority = [...draft.priority];
+    const [moved] = priority.splice(from, 1);
+    priority.splice(to, 0, moved);
+    onChange({ priority });
   };
 
   return (
-    <form className="settings" onSubmit={submit}>
-      <p className="muted">
-        The defaults every plan starts from. You can still bend days and the
-        known-vs-new mix for a single plan from the Plan tab.
-      </p>
-
+    <>
       <section className="settings-card">
         <div className="row">
           <Stepper
@@ -328,27 +302,26 @@ export function PlanningSettingsForm({
             value={draft.daysToPlan}
             min={1}
             max={14}
-            onChange={(daysToPlan) => patch({ daysToPlan })}
+            onChange={(daysToPlan) => onChange({ daysToPlan })}
           />
           <Stepper
             label="Suggestions / day"
             value={draft.suggestionsPerDay}
             min={1}
             max={10}
-            onChange={(suggestionsPerDay) => patch({ suggestionsPerDay })}
+            onChange={(suggestionsPerDay) => onChange({ suggestionsPerDay })}
           />
         </div>
         <BiasSlider
           id="known-vs-unknown"
           value={draft.knownVsUnknownBias}
-          onChange={(knownVsUnknownBias) => patch({ knownVsUnknownBias })}
+          onChange={(knownVsUnknownBias) => onChange({ knownVsUnknownBias })}
         />
       </section>
 
       <section className="settings-card">
         <label>
-          Priority order{" "}
-          <span className="hint">(drag to reorder, top = matters most)</span>
+          Priority order <span className="hint">(top = matters most)</span>
         </label>
         <ul className="drag-list">
           {draft.priority.map((key, index) => (
@@ -370,16 +343,33 @@ export function PlanningSettingsForm({
               <span className="grip" aria-hidden="true">
                 ⠿
               </span>
-              {PRIORITY_LABELS[key] ?? key}
+              <span className="rank-label">{PRIORITY_LABELS[key] ?? key}</span>
+              <span className="rank-moves">
+                <button
+                  type="button"
+                  className="rank-move"
+                  aria-label={`Move ${PRIORITY_LABELS[key] ?? key} up`}
+                  disabled={index === 0}
+                  onClick={() => movePriority(index, index - 1)}
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  className="rank-move"
+                  aria-label={`Move ${PRIORITY_LABELS[key] ?? key} down`}
+                  disabled={index === draft.priority.length - 1}
+                  onClick={() => movePriority(index, index + 1)}
+                >
+                  ↓
+                </button>
+              </span>
             </li>
           ))}
         </ul>
       </section>
 
-      <ShopPicker
-        shops={draft.shops}
-        onChange={(shops) => patch({ shops })}
-      />
+      <ShopPicker shops={draft.shops} onChange={(shops) => onChange({ shops })} />
 
       <section className="settings-card">
         <label>
@@ -394,7 +384,7 @@ export function PlanningSettingsForm({
               role="radio"
               aria-checked={(draft.recipeMode ?? "mix") === mode}
               className={`mode-pill${(draft.recipeMode ?? "mix") === mode ? " on" : ""}`}
-              onClick={() => patch({ recipeMode: mode })}
+              onClick={() => onChange({ recipeMode: mode })}
             >
               <strong>{label}</strong>
               <span>{hint}</span>
@@ -412,9 +402,57 @@ export function PlanningSettingsForm({
           id="inspiration"
           placeholder="e.g. more Vietnamese food, less pasta"
           value={draft.inspiration}
-          onChange={(e) => patch({ inspiration: e.target.value })}
+          onChange={(e) => onChange({ inspiration: e.target.value })}
         />
       </section>
+    </>
+  );
+}
+
+// The household's planning settings, edited as a draft and saved together.
+export function PlanningSettingsForm({
+  settings,
+  onSaved,
+}: {
+  settings: PlanningSettings;
+  onSaved: (settings: PlanningSettings) => void;
+}) {
+  // The draft is the working copy; nothing persists until Save. Starting from
+  // the stored settings means the form reflects what's on disk.
+  const [draft, setDraft] = useState<PlanningSettings>(settings);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const patch = (fields: Partial<PlanningSettings>) => {
+    setDraft((prev) => ({ ...prev, ...fields }));
+    setSaved(false);
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await saveSettings(draft);
+      onSaved(updated);
+      setSaved(true);
+    } catch (e: unknown) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="settings" onSubmit={submit}>
+      <h3 className="settings-heading">Planning defaults</h3>
+      <p className="muted">
+        What every plan starts from. ⚡ Suggest dishes on the My week tab lets
+        you bend them for a single plan.
+      </p>
+
+      <PlanningFields draft={draft} onChange={patch} />
 
       <div className="settings-actions">
         <button className="btn primary" type="submit" disabled={busy}>
@@ -427,30 +465,74 @@ export function PlanningSettingsForm({
   );
 }
 
-// What the ⚙ opens: the planning defaults, and the planner prompt behind them.
+// What the ⚙ opens, in three parts: the household (who's signed in, who else
+// is in it, how the app looks, installing it), the planning defaults and the
+// prompt behind them, and the model.
+export type SettingsSection = "household" | "planning" | "model";
+
+const SECTIONS: { section: SettingsSection; label: string }[] = [
+  { section: "household", label: "Household" },
+  { section: "planning", label: "Planning" },
+  { section: "model", label: "Model" },
+];
+
 export function SettingsPanel({
   settings,
   onSaved,
+  initialSection = "household",
 }: {
   settings: PlanningSettings;
   onSaved: (settings: PlanningSettings) => void;
+  initialSection?: SettingsSection;
 }) {
+  const [section, setSection] = useState<SettingsSection>(initialSection);
   const [promptOpen, setPromptOpen] = useState(false);
   return (
     <div className="settings-panel">
-      <PlanningSettingsForm settings={settings} onSaved={onSaved} />
-      <section className="settings-card prompt-card">
-        <div>
-          <label>Planner prompt</label>
-          <p className="muted">
-            The instructions sent to the model, with these settings filled in
-            wherever a <code className="var-token">{"{{variable}}"}</code> appears.
-          </p>
+      <div className="segmented settings-sections" role="tablist">
+        {SECTIONS.map((s) => (
+          <button
+            key={s.section}
+            type="button"
+            role="tab"
+            aria-selected={section === s.section}
+            className={section === s.section ? "on" : ""}
+            onClick={() => setSection(s.section)}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {section === "household" && (
+        <div className="settings settings-stack">
+          <AccountCard />
+          <HouseholdCard />
+          <PersonalizeCard />
+          <InstallCard />
         </div>
-        <button type="button" className="btn" onClick={() => setPromptOpen(true)}>
-          Edit prompt…
-        </button>
-      </section>
+      )}
+
+      {section === "planning" && (
+        <>
+          <PlanningSettingsForm settings={settings} onSaved={onSaved} />
+          <section className="settings-card prompt-card">
+            <div>
+              <label>Planner prompt</label>
+              <p className="muted">
+                The instructions sent to the model, with these settings filled in
+                wherever a <code className="var-token">{"{{variable}}"}</code> appears.
+              </p>
+            </div>
+            <button type="button" className="btn" onClick={() => setPromptOpen(true)}>
+              Edit prompt…
+            </button>
+          </section>
+        </>
+      )}
+
+      {section === "model" && <ModelSettingsCard />}
+
       {promptOpen && <PromptEditor onClose={() => setPromptOpen(false)} />}
     </div>
   );

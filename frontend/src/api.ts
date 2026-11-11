@@ -127,11 +127,9 @@ export type PlanningRunSummary = {
   fridgeSnippet: string;
 };
 
-export type SettingsOverride = {
-  daysToPlan: number;
-  suggestionsPerDay: number;
-  knownVsUnknownBias: number;
-};
+// The settings for a single run, from the Suggest dishes sheet: on top of the
+// saved ones, never written back. Anything left out keeps its saved value.
+export type SettingsOverride = Partial<PlanningSettings>;
 
 // A row of the backend-owned Danish-chain catalog (issue #20). `hasIcon` lets a
 // pill choose the coloured-initial fallback without a failed image request.
@@ -141,7 +139,14 @@ export type Shop = {
   hasIcon: boolean;
 };
 
+// Fired when the server says the session is gone (signed out elsewhere, or a
+// password change on another device), so the app can show the sign-in screen.
+export const SIGNED_OUT_EVENT = "food-planner:signed-out";
+
 async function json<T>(resp: Response): Promise<T> {
+  if (resp.status === 401 && !resp.url.includes("/api/auth/")) {
+    window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+  }
   if (!resp.ok) {
     const detail = await resp
       .json()
@@ -150,6 +155,134 @@ async function json<T>(resp: Response): Promise<T> {
     throw new Error(detail ?? resp.statusText);
   }
   return resp.json() as Promise<T>;
+}
+
+// Accounts: someone signing up alone starts a household of their own; an
+// invite link joins its household instead. A password is optional; the server
+// keeps only a one-way hash of it.
+export type Me = {
+  id: string;
+  username: string;
+  hasPassword: boolean;
+  owner: boolean; // the server's first user, who may use its own model keys
+  householdId: string;
+};
+
+function postJson<T>(url: string, body: unknown): Promise<T> {
+  return fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then((r) => json<T>(r));
+}
+
+// null when nobody is signed in on this device.
+export async function getMe(): Promise<Me | null> {
+  const resp = await fetch("/api/auth/me");
+  if (resp.status === 401) return null;
+  return json<Me>(resp);
+}
+
+// With an invite token, the new user joins the inviter's household.
+export function signUp(
+  username: string,
+  password: string | null,
+  invite?: string | null,
+): Promise<Me> {
+  return postJson<Me>("/api/auth/signup", { username, password, invite: invite ?? null });
+}
+
+export function signIn(username: string, password: string | null): Promise<Me> {
+  return postJson<Me>("/api/auth/login", { username, password });
+}
+
+export async function signOut(): Promise<void> {
+  await fetch("/api/auth/logout", { method: "POST" });
+}
+
+// newPassword null removes the password.
+export function changePassword(
+  currentPassword: string | null,
+  newPassword: string | null,
+): Promise<Me> {
+  return fetch("/api/auth/password", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ currentPassword, newPassword }),
+  }).then((r) => json<Me>(r));
+}
+
+// --- The household: members, invite links, appearance ------------------------
+
+// What an invite link says before anyone signs up through it. Rejects with
+// "This invite link has expired…" once it's no good.
+export type InvitePreview = {
+  householdName: string;
+  invitedBy: string;
+  expiresAt: string;
+};
+
+export function checkInvite(token: string): Promise<InvitePreview> {
+  return fetch(`/api/invites/${encodeURIComponent(token)}`).then((r) =>
+    json<InvitePreview>(r),
+  );
+}
+
+export type Invite = {
+  id: string;
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
+export type HouseholdInfo = {
+  id: string;
+  name: string;
+  members: { id: string; username: string }[];
+  invites: Invite[];
+};
+
+export function getHouseholdInfo(): Promise<HouseholdInfo> {
+  return fetch("/api/household").then((r) => json<HouseholdInfo>(r));
+}
+
+// A new invite link's token comes back this once; the server keeps a digest.
+export function createInvite(): Promise<Invite & { token: string }> {
+  return postJson<Invite & { token: string }>("/api/household/invites", {});
+}
+
+export async function revokeInvite(id: string): Promise<void> {
+  const resp = await fetch(`/api/household/invites/${id}`, { method: "DELETE" });
+  if (!resp.ok) await json(resp);
+}
+
+// Moves the signed-in user into the invite's household.
+export function joinHousehold(invite: string): Promise<Me> {
+  return postJson<Me>("/api/household/join", { invite });
+}
+
+// The link someone opens to join: the app's own address with the token.
+export function inviteUrl(token: string): string {
+  return `${window.location.origin}/?invite=${encodeURIComponent(token)}`;
+}
+
+// How the household has personalised the app; null is the app's own look.
+export type Appearance = {
+  name: string | null;
+  emoji: string | null;
+  accent: string | null;
+};
+
+export function getAppearance(): Promise<Appearance> {
+  return fetch("/api/household/appearance").then((r) => json<Appearance>(r));
+}
+
+export function saveAppearance(appearance: Appearance): Promise<Appearance> {
+  return fetch("/api/household/appearance", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(appearance),
+  }).then((r) => json<Appearance>(r));
 }
 
 export function getSettings(): Promise<PlanningSettings> {
@@ -163,6 +296,60 @@ export function saveSettings(settings: PlanningSettings): Promise<PlanningSettin
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(settings),
   }).then((r) => json<PlanningSettings>(r));
+}
+
+// Settings → Model: which LLM plans, scans and reviews. Secrets are write-only:
+// the backend says whether one is set, never what it is.
+export type ModelProvider = "openai" | "claude-code";
+
+export type ModelSettings = {
+  provider: ModelProvider;
+  openaiModel: string | null;
+  claudeModel: string | null;
+  openaiKeySet: boolean;
+  openaiKeyHint: string | null;
+  openaiKeyFromEnv: boolean;
+  defaultOpenaiModel: string;
+  defaultClaudeModel: string;
+  claudeTokenSet: boolean;
+  // Not the server's owner: a key or token of their own is needed.
+  usesOwnCredentialsOnly: boolean;
+};
+
+export type ModelSettingsUpdate = {
+  provider: ModelProvider;
+  openaiModel: string | null;
+  claudeModel: string | null;
+  // undefined/null keeps the stored secret, "" removes it.
+  openaiApiKey?: string | null;
+  claudeToken?: string | null;
+};
+
+export type ClaudeStatus = {
+  installed: boolean;
+  loggedIn: boolean;
+  authMethod?: string | null;
+  email?: string | null;
+  subscriptionType?: string | null;
+  error?: string;
+  // Not the server's owner and no token saved: they need their own.
+  needsToken?: boolean;
+};
+
+export function getModelSettings(): Promise<ModelSettings> {
+  return fetch("/api/model").then((r) => json<ModelSettings>(r));
+}
+
+export function saveModelSettings(update: ModelSettingsUpdate): Promise<ModelSettings> {
+  return fetch("/api/model", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(update),
+  }).then((r) => json<ModelSettings>(r));
+}
+
+export function getClaudeStatus(): Promise<ClaudeStatus> {
+  return fetch("/api/model/claude-status").then((r) => json<ClaudeStatus>(r));
 }
 
 // The fixed Danish-chain catalog for the preferred-shops picker (issue #20).
@@ -232,6 +419,61 @@ export function recipeAsSuggestion(recipe: Recipe): Suggestion {
     discounts: recipe.discounts,
     recipe: recipe.recipe,
   };
+}
+
+// A library Dish shaped as a Suggestion, so it opens, adds ingredients and
+// goes into My week like a planned dish. Its ingredients are free text, one
+// per line, so each line is the name and there's no separate quantity.
+export function dishAsSuggestion(dish: Dish): Suggestion {
+  return {
+    title: dish.title,
+    description: dish.recipe ?? "",
+    ingredients: (dish.ingredients ?? "")
+      .split("\n")
+      .map((line) => line.replace(/^[-•*]\s*/, "").trim())
+      .filter(Boolean)
+      .map((name) => ({ name, quantity: "" })),
+    estimatedCost: 0,
+    prepTimeMinutes: 0,
+    sourceDish: dish.id,
+    discounts: [],
+    recipe: null,
+  };
+}
+
+// My week: the dishes chosen for each week. A week is named by its Monday
+// ("2026-10-26"); entries from earlier weeks stay to look back through.
+export type MyWeekEntry = {
+  id: string;
+  week: string;
+  addedAt: string;
+  suggestion: Suggestion;
+};
+
+export type MyWeek = {
+  currentWeek: string;
+  entries: MyWeekEntry[]; // every week, oldest first
+};
+
+export function getMyWeek(): Promise<MyWeek> {
+  return fetch("/api/my-week").then((r) => json<MyWeek>(r));
+}
+
+// Adding a title the week already has returns that entry with created: false.
+export function addToMyWeek(
+  suggestion: Suggestion,
+  week?: string,
+): Promise<{ entry: MyWeekEntry; created: boolean }> {
+  return fetch("/api/my-week", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ suggestion, week }),
+  }).then((r) => json<{ entry: MyWeekEntry; created: boolean }>(r));
+}
+
+export async function removeFromMyWeek(id: string): Promise<void> {
+  const resp = await fetch(`/api/my-week/${id}`, { method: "DELETE" });
+  if (!resp.ok) await json(resp);
 }
 
 // A dinner recipe the planner would consider this week, and why: the fresh

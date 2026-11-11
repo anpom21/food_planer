@@ -311,7 +311,7 @@ def test_dish_titles_steer_the_ranking(client, fake_openai, fake_tjek) -> None:
 
 
 def test_every_run_writes_a_debug_trace(
-    client, fake_openai, fake_tjek, data_dir
+    client, fake_openai, fake_tjek, household_dir
 ) -> None:
     import json
 
@@ -333,7 +333,7 @@ def test_every_run_writes_a_debug_trace(
     _settings(client, shops=["netto"])
     run = _plan(client)
 
-    trace = json.loads((data_dir / "run_logs" / f"{run['id']}.json").read_text("utf-8"))
+    trace = json.loads((household_dir / "run_logs" / f"{run['id']}.json").read_text("utf-8"))
     assert trace["settings"]["shops"] == ["netto"]
     assert trace["offers"]["shownToModel"] == 1
     (call,) = trace["calls"]

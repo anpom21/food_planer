@@ -141,7 +141,7 @@ def test_truncation_retries_once_and_marks_partial(client, fake_openai) -> None:
 
 
 def test_model_call_error_is_a_failed_run_not_a_500(
-    client, fake_openai, data_dir
+    client, fake_openai, household_dir
 ) -> None:
     import json
 
@@ -156,7 +156,7 @@ def test_model_call_error_is_a_failed_run_not_a_500(
     assert fake_openai.calls == 1  # the client already retried; no second pass
     # Persisted and traced, so a stalled call leaves evidence behind.
     assert client.get(f"/api/planning-runs/{run['id']}").json()["error"]
-    trace = json.loads((data_dir / "run_logs" / f"{run['id']}.json").read_text("utf-8"))
+    trace = json.loads((household_dir / "run_logs" / f"{run['id']}.json").read_text("utf-8"))
     assert trace["calls"][0]["error"] == "TimeoutError: Request timed out."
 
 
@@ -211,6 +211,33 @@ def test_settings_override_drives_the_planned_prompt(client, fake_openai) -> Non
     assert "Plan exactly 4 day(s), with 3 dinner suggestion(s) per day." in prompt
     # bias 0.9 renders the "lean toward new dishes" prose, not the balanced one.
     assert "Lean toward new dishes" in prompt
+
+
+def test_a_full_override_plans_with_every_setting_but_saves_none(
+    client, fake_openai
+) -> None:
+    # The Suggest dishes sheet can bend everything for one run: priorities,
+    # shops, Inspiration and the recipe mode, not just the numbers.
+    fake_openai.canned = _canned_week()
+    before = client.get("/api/settings").json()
+
+    client.post(
+        "/api/planning-runs",
+        json={
+            "settingsOverride": {
+                "daysToPlan": 2,
+                "priority": ["healthy", "delicious", "quick", "cheap"],
+                "inspiration": "something with aubergine",
+                "recipeMode": "none",
+            },
+        },
+    )
+
+    prompt = fake_openai.prompts[-1]
+    assert "Plan exactly 2 day(s)" in prompt
+    assert "aubergine" in prompt
+    assert prompt.index("healthy") < prompt.index("cheap")
+    assert client.get("/api/settings").json() == before
 
 
 def test_run_persists_across_restart(make_client, data_dir, fake_openai) -> None:

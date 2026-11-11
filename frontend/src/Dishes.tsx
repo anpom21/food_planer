@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   addShoppingItems,
   createDish,
+  dishAsSuggestion,
   listDishes,
   listRecipeMatches,
   listRecipes,
@@ -10,11 +11,14 @@ import {
   type Recipe,
   type RecipeMatch,
   type ShoppingItemInput,
+  type Suggestion,
 } from "./api";
 import { useHousehold } from "./household";
 import { dishMatches, MyDishes } from "./MyDishes";
 import { atSelectedShops } from "./OfferTag";
 import { DetailsModal, IngredientReview } from "./PlanWeek";
+import { useMyWeekStore } from "./myWeekStore";
+import { AddToWeekButton } from "./PlatePlus";
 import "./recipes.css";
 
 // The Dishes tab: the household's own dishes and the imported online recipes
@@ -30,7 +34,8 @@ import "./recipes.css";
 // opens the same Details and Add-ingredients views as the plan — tapping its
 // photo opens Details, whose photo links to the recipe site (the only link
 // out; there's no separate "go to recipe" button). ☆ saves a
-// recipe into My dishes. The grid renders a page at a time (there are ~1800
+// recipe into My dishes, and the plate+ next to it puts it in My week, as
+// adding its ingredients does too. The grid renders a page at a time (there are ~1800
 // recipes) behind a "Show more" button.
 
 const PAGE = 60;
@@ -94,15 +99,18 @@ function RecipeCard({
           <span className="recipe-thumb-empty">No image</span>
         )}
       </button>
-      <button
-        className={`recipe-save${saved ? " on" : ""}`}
-        onClick={onSave}
-        disabled={saved}
-        aria-label={saved ? "In my dishes" : "Save to my dishes"}
-        title={saved ? "In my dishes" : "Save to my dishes"}
-      >
-        {saved ? "★" : "☆"}
-      </button>
+      <div className="card-corner">
+        <AddToWeekButton suggestion={recipeAsSuggestion(recipe)} />
+        <button
+          className={`recipe-save${saved ? " on" : ""}`}
+          onClick={onSave}
+          disabled={saved}
+          aria-label={saved ? "In my dishes" : "Save to my dishes"}
+          title={saved ? "In my dishes" : "Save to my dishes"}
+        >
+          {saved ? "★" : "☆"}
+        </button>
+      </div>
       <div className="recipe-body">
         <h2 className="card-title">{recipe.title}</h2>
         <div className="sugg-chips">
@@ -141,6 +149,7 @@ function RecipeCard({
 
 export function Dishes() {
   const { settings, notify, go, refreshCounts } = useHousehold();
+  const myWeek = useMyWeekStore();
   const [view, setView] = useState<View>("week");
   const [dishes, setDishes] = useState<Dish[] | null>(null);
   const [recipes, setRecipes] = useState<Recipe[] | null>(null);
@@ -148,8 +157,10 @@ export function Dishes() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [shown, setShown] = useState(PAGE);
-  const [details, setDetails] = useState<Recipe | null>(null);
-  const [adding, setAdding] = useState<Recipe | null>(null);
+  // A recipe or library dish open in Details, or whose ingredients are being
+  // added — both shaped as Suggestions.
+  const [details, setDetails] = useState<Suggestion | null>(null);
+  const [adding, setAdding] = useState<Suggestion | null>(null);
 
   useEffect(() => {
     listDishes()
@@ -197,15 +208,19 @@ export function Dishes() {
     }
   }
 
+  // Adding a dish's ingredients also puts the dish in this week's My week.
   async function handleAdd(items: ShoppingItemInput[]) {
+    const dish = adding!;
     try {
       await addShoppingItems(items);
       setAdding(null);
+      const created = await myWeek.add([dish]);
       refreshCounts();
-      notify(`${items.length} ingredient${items.length === 1 ? "" : "s"} added`, {
-        label: "View list",
-        run: () => go("shopping"),
-      });
+      notify(
+        `${items.length} ingredient${items.length === 1 ? "" : "s"} added` +
+          (created ? " · in My week" : ""),
+        { label: "View list", run: () => go("shopping") },
+      );
     } catch (e: unknown) {
       setError(String(e));
       setAdding(null);
@@ -271,7 +286,12 @@ export function Dishes() {
         ) : (
           <>
             {query && <p className="muted result-count">{mineShown} of {dishes.length}</p>}
-            <MyDishes dishes={dishes} query={query} onChange={setDishes} />
+            <MyDishes
+              dishes={dishes}
+              query={query}
+              onChange={setDishes}
+              onAddIngredients={(dish) => setAdding(dishAsSuggestion(dish))}
+            />
           </>
         )
       ) : cards === null ? (
@@ -300,8 +320,8 @@ export function Dishes() {
                 key={recipe.url}
                 recipe={recipe}
                 saved={savedTitles.has(recipe.title.toLowerCase())}
-                onDetails={() => setDetails(recipe)}
-                onAdd={() => setAdding(recipe)}
+                onDetails={() => setDetails(recipeAsSuggestion(recipe))}
+                onAdd={() => setAdding(recipeAsSuggestion(recipe))}
                 onSave={() => void saveRecipe(recipe)}
               />
             ))}
@@ -317,11 +337,19 @@ export function Dishes() {
       )}
 
       {details && (
-        <DetailsModal suggestion={recipeAsSuggestion(details)} known={null} onClose={() => setDetails(null)} />
+        <DetailsModal
+          suggestion={details}
+          known={null}
+          onClose={() => setDetails(null)}
+          onAddIngredients={() => {
+            setAdding(details);
+            setDetails(null);
+          }}
+        />
       )}
       {adding && (
         <IngredientReview
-          selected={[{ key: adding.url, dayLabel: "Recipe", suggestion: recipeAsSuggestion(adding) }]}
+          selected={[{ key: "one", dayLabel: "My week", suggestion: adding }]}
           onCancel={() => setAdding(null)}
           onConfirm={(items) => void handleAdd(items)}
         />

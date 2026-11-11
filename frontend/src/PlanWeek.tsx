@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { useHousehold } from "./household";
-import { BiasSlider, Stepper } from "./SettingsScreen";
+import { PlanningFields } from "./SettingsScreen";
+import { Sheet } from "./Sheet";
 import { OfferCard, OfferTag, offerFor, runAtSelectedShops } from "./OfferTag";
 import { orderedIngredients } from "./ingredientOrder";
 import { OnHandBadge } from "./OnHand";
 import { RecipeButton, RecipeFacts, RecipeThumb } from "./RecipeLink";
+import { MyWeekPanel, useMyWeek } from "./MyWeek";
+import { AddToWeekButton } from "./PlatePlus";
 import {
   addShoppingItems,
   getFridge,
@@ -12,6 +15,7 @@ import {
   listDishes,
   listPlanningRuns,
   planWeek,
+  saveSettings,
   type Dish,
   type PlanningRun,
   type PlanningRunSummary,
@@ -21,35 +25,34 @@ import {
   type Suggestion,
 } from "./api";
 
-// Issue #23 — Plan a Week: one button, one pass, a board of day columns.
+// The My week tab: the dishes chosen for the week on top (MyWeek.tsx), and
+// below them the planner that suggests more.
 //
-// The plan owns the screen. Controls collapse into a top bar so they never
-// crowd out the plan: the "⚡ Plan my week" button and a chip summarising the
+// Issue #23 — the planner: one button, one pass, a board of day columns.
+// Controls collapse into a top bar so they never crowd out the plan: the
+// "⚡ Suggest dishes" button and a chip summarising the
 // settings this run would use. One press fires a single structured LLM call
 // that returns the whole week at once, so no dish repeats across days.
 //
-// Issue #25 — Per-run settings override: the chip is a button that opens a
-// modal to bend days, suggestions-per-day and the known-vs-unknown lean for
-// *this run only*. The override is applied to one prompt and never written back
-// to the saved settings, so planning a short week never means editing (and
-// forgetting to restore) your defaults.
+// Issue #25, reworked — ⚡ Suggest dishes opens a sheet with every planning
+// setting (days, the known-vs-unknown lean, priorities, shops, online recipes,
+// Inspiration), starting from the saved defaults, and plans from there. "Keep
+// as my defaults" saves them first; unticked, they're sent as an override for
+// this run only and never written back, so planning a short week never means
+// editing (and forgetting to restore) your defaults.
 
-// The three settings a per-run override can bend. The chip and the modal both
-// read the override when present, else the defaults.
-function defaultsOf(s: PlanningSettings): SettingsOverride {
-  return {
-    daysToPlan: s.daysToPlan,
-    suggestionsPerDay: s.suggestionsPerDay,
-    knownVsUnknownBias: s.knownVsUnknownBias,
-  };
-}
+const PLANNING_KEYS = [
+  "daysToPlan",
+  "suggestionsPerDay",
+  "knownVsUnknownBias",
+  "priority",
+  "shops",
+  "inspiration",
+  "recipeMode",
+] as const;
 
-function sameAsDefaults(a: SettingsOverride, b: SettingsOverride): boolean {
-  return (
-    a.daysToPlan === b.daysToPlan &&
-    a.suggestionsPerDay === b.suggestionsPerDay &&
-    a.knownVsUnknownBias === b.knownVsUnknownBias
-  );
+function sameSettings(a: PlanningSettings, b: PlanningSettings): boolean {
+  return PLANNING_KEYS.every((k) => JSON.stringify(a[k]) === JSON.stringify(b[k]));
 }
 
 function biasWord(bias: number): string {
@@ -58,86 +61,73 @@ function biasWord(bias: number): string {
   return "a mix";
 }
 
-function settingsSummary(s: SettingsOverride): string {
+function settingsSummary(s: PlanningSettings): string {
   return `${s.daysToPlan} days · ${s.suggestionsPerDay}/day · ${biasWord(
     s.knownVsUnknownBias,
   )}`;
 }
 
-// The just-for-this-run modal behind the settings chip. It is unmistakably
-// labelled as a per-run override and carries a "Reset to my defaults" link, so
-// nobody is ever left wondering whether they have changed their saved settings.
-function OverrideModal({
-  draft,
+function SuggestSheet({
+  initial,
   defaults,
-  onChange,
-  onReset,
-  onEditDefaults,
+  onSuggest,
   onClose,
 }: {
-  draft: SettingsOverride;
-  defaults: SettingsOverride;
-  onChange: (draft: SettingsOverride) => void;
-  onReset: () => void;
-  onEditDefaults: () => void;
+  initial: PlanningSettings;
+  defaults: PlanningSettings;
+  // Resolves once the settings are saved (when kept) and planning has begun.
+  onSuggest: (settings: PlanningSettings, keep: boolean) => Promise<void>;
   onClose: () => void;
 }) {
-  const isOverridden = !sameAsDefaults(draft, defaults);
+  const [draft, setDraft] = useState<PlanningSettings>(initial);
+  const [keep, setKeep] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const bent = !sameSettings(draft, defaults);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await onSuggest(draft, keep && bent);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  }
+
   return (
-    <div
-      className="modal-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal override-modal">
-        <h2>Plan this week with…</h2>
-        <p className="override-note">
-          🕐 Just for this run — your saved defaults stay untouched.
+    <Sheet title="Suggest dishes" onClose={onClose}>
+      <form className="settings suggest-sheet" onSubmit={submit}>
+        <p className="muted">
+          What should this plan go for? It starts from your saved defaults.
         </p>
-        <div className="row">
-          <Stepper
-            label="Days to plan"
-            value={draft.daysToPlan}
-            min={1}
-            max={14}
-            onChange={(daysToPlan) => onChange({ ...draft, daysToPlan })}
-          />
-          <Stepper
-            label="Suggestions / day"
-            value={draft.suggestionsPerDay}
-            min={1}
-            max={10}
-            onChange={(suggestionsPerDay) =>
-              onChange({ ...draft, suggestionsPerDay })
-            }
-          />
-        </div>
-        <BiasSlider
-          id="override-bias"
-          value={draft.knownVsUnknownBias}
-          onChange={(knownVsUnknownBias) =>
-            onChange({ ...draft, knownVsUnknownBias })
-          }
+        <PlanningFields
+          draft={draft}
+          onChange={(fields) => setDraft((prev) => ({ ...prev, ...fields }))}
         />
-        <div className="modal-actions override-actions">
-          <button
-            type="button"
-            className="link-btn"
-            onClick={onReset}
-            disabled={!isOverridden}
-          >
-            Reset to my defaults
+        <div className="settings-actions suggest-actions">
+          {bent ? (
+            <label className="keep-defaults">
+              <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
+              Keep as my defaults
+            </label>
+          ) : (
+            <span className="muted keep-defaults">Your saved defaults</span>
+          )}
+          {bent && (
+            <button type="button" className="link-btn" onClick={() => setDraft(defaults)}>
+              Reset
+            </button>
+          )}
+          <button className="btn primary" type="submit" disabled={busy}>
+            {busy ? "Starting…" : "⚡ Suggest dishes"}
           </button>
-          <button type="button" className="link-btn" onClick={onEditDefaults}>
-            Change the defaults…
-          </button>
-          <button className="btn primary" onClick={onClose}>
-            Done
-          </button>
+          {error && <span className="error">{error}</span>}
         </div>
-      </div>
-    </div>
+      </form>
+    </Sheet>
   );
 }
 
@@ -218,6 +208,7 @@ function SuggestionCard({
           Details
         </button>
         {suggestion.recipe && <RecipeButton recipe={suggestion.recipe} />}
+        <AddToWeekButton suggestion={suggestion} className="inline" />
       </div>
     </article>
   );
@@ -229,10 +220,14 @@ export function DetailsModal({
   suggestion,
   known,
   onClose,
+  onAddIngredients,
 }: {
   suggestion: Suggestion;
   known: Dish | null;
   onClose: () => void;
+  // When given, a "+ Ingredients" button at the bottom adds this dish's
+  // ingredients to the shopping list (and the dish to My week).
+  onAddIngredients?: () => void;
 }) {
   return (
     <div
@@ -286,9 +281,18 @@ export function DetailsModal({
         )}
         <div className="modal-actions">
           {suggestion.recipe && <RecipeButton recipe={suggestion.recipe} />}
-          <button className={suggestion.recipe ? "btn" : "btn primary"} onClick={onClose}>
+          <button className="btn" onClick={onClose}>
             Close
           </button>
+          {onAddIngredients && (
+            <button
+              className="btn primary"
+              onClick={onAddIngredients}
+              disabled={suggestion.ingredients.length === 0}
+            >
+              + Ingredients
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -537,7 +541,7 @@ function ArchiveModal({
         </p>
         {error && <p className="error">Could not load past plans: {error}</p>}
         {runs && runs.length === 0 && (
-          <p className="muted">No plans yet — hit “⚡ Plan my week”.</p>
+          <p className="muted">No plans yet — hit “⚡ Suggest dishes”.</p>
         )}
         {runs && runs.length > 0 && (
           <div className="review-scroll">
@@ -582,7 +586,7 @@ function ArchiveModal({
 }
 
 export function PlanWeek() {
-  const { settings, go, notify, openSettings, refreshCounts } = useHousehold();
+  const { settings, setSettings, go, notify, openSettings, refreshCounts } = useHousehold();
   const [freshCount, setFreshCount] = useState<number | null>(null);
   const [dishes, setDishes] = useState<Dish[]>([]);
   const [run, setRun] = useState<PlanningRun | null>(null);
@@ -603,14 +607,19 @@ export function PlanWeek() {
   const [error, setError] = useState<string | null>(null);
   // A suggestion open in the Details modal, or null when it's closed.
   const [details, setDetails] = useState<Suggestion | null>(null);
-  // The just-for-this-run override, or null when this run uses the defaults.
-  const [override, setOverride] = useState<SettingsOverride | null>(null);
-  const [editing, setEditing] = useState(false);
+  // The settings the last plan used when they weren't the saved defaults, so
+  // Try again and the next sheet start from them; null means the defaults.
+  const [override, setOverride] = useState<PlanningSettings | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
   // Card selection — pure frontend state, gone on refresh, never persisted.
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [reviewing, setReviewing] = useState(false);
   // The Past-plans archive modal (issue #26).
   const [browsing, setBrowsing] = useState(false);
+  // My week, shown above the planner; picks from the planner land in it.
+  const week = useMyWeek();
+  // One dish whose ingredients are being reviewed (from My week or Details).
+  const [addingOne, setAddingOne] = useState<Suggestion | null>(null);
 
   useEffect(() => {
     listDishes()
@@ -625,20 +634,30 @@ export function PlanWeek() {
 
   // What the next run will actually be planned against: the override when set,
   // otherwise the household's saved defaults.
-  const defaults = defaultsOf(settings);
-  const effective = override ?? defaults;
+  const effective = override ?? settings;
 
-  // The modal edits a draft in place; storing null when it matches the defaults
-  // keeps the chip honest (no "this run" flag when nothing is actually bent).
-  function applyDraft(draft: SettingsOverride) {
-    setOverride(sameAsDefaults(draft, defaults) ? null : draft);
+  // From the sheet: save the settings as the defaults if asked, then plan with
+  // them. Storing null when they match the defaults keeps the chip honest (no
+  // "this run" flag when nothing is actually bent).
+  async function suggestWith(chosen: PlanningSettings, keep: boolean) {
+    let next: PlanningSettings | null = sameSettings(chosen, settings) ? null : chosen;
+    if (keep) {
+      setSettings(await saveSettings(chosen));
+      next = null;
+    }
+    setOverride(next);
+    setSuggesting(false);
+    void handlePlan(next);
   }
 
-  async function handlePlan() {
+  async function handlePlan(withSettings: PlanningSettings | null = override) {
     setPlanning(true);
     setError(null);
     try {
-      setRun(await planWeek(override ?? undefined));
+      const runOverride: SettingsOverride | undefined = withSettings
+        ? Object.fromEntries(PLANNING_KEYS.map((k) => [k, withSettings[k]]))
+        : undefined;
+      setRun(await planWeek(runOverride));
       // A fresh plan replaces the board, so old selections no longer point at
       // anything — start clean.
       setSelectedKeys(new Set());
@@ -672,9 +691,9 @@ export function PlanWeek() {
     });
   }
 
-  // What the board shows: the run, with offers only from shops selected in
-  // settings right now (the stored run keeps them all).
-  const board = run && runAtSelectedShops(run, settings.shops);
+  // What the board shows: the run, with offers only from the shops it's being
+  // planned for right now (the stored run keeps them all).
+  const board = run && runAtSelectedShops(run, effective.shops);
 
   // Selected cards in board order (day 1 → day N), ready for the review.
   const selected: Selected[] = [];
@@ -686,38 +705,65 @@ export function PlanWeek() {
     });
   });
 
+  // Adding a dish's ingredients also puts the dish in My week.
+  async function addIngredients(items: ShoppingItemInput[], dishes: Suggestion[]) {
+    await addShoppingItems(items);
+    const created = await week.add(dishes);
+    refreshCounts();
+    notify(
+      `${items.length} ingredient${items.length === 1 ? "" : "s"} added` +
+        (created ? " · in My week" : ""),
+      { label: "View list", run: () => go("shopping") },
+    );
+  }
+
   async function handleConfirm(items: ShoppingItemInput[]) {
     try {
-      await addShoppingItems(items);
+      await addIngredients(items, selected.map((s) => s.suggestion));
       setReviewing(false);
       setSelectedKeys(new Set());
-      refreshCounts();
-      notify(`${items.length} ingredient${items.length === 1 ? "" : "s"} added`, {
-        label: "View list",
-        run: () => go("shopping"),
-      });
     } catch (e: unknown) {
       setError(String(e));
       setReviewing(false);
     }
   }
 
+  async function handleConfirmOne(items: ShoppingItemInput[]) {
+    const dish = addingOne!;
+    setAddingOne(null);
+    try {
+      await addIngredients(items, [dish]);
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  }
+
   return (
     <section className="plan-week">
+      <MyWeekPanel state={week} onDetails={setDetails} onIngredients={setAddingOne} />
+
+      <header className="planner-head">
+        <h2>Suggestions</h2>
+        <p className="muted">
+          Let the planner suggest dishes from your fridge, this week's offers and
+          your dishes. Pick some and add their ingredients — they go into My week.
+        </p>
+      </header>
       <div className="plan-bar">
         <button
           className="btn primary"
-          onClick={handlePlan}
+          onClick={() => setSuggesting(true)}
           disabled={planning}
         >
-          {planning ? `Asking the model… ${elapsed}s` : "⚡ Plan my week"}
+          {planning ? `Asking the model… ${elapsed}s` : "⚡ Suggest dishes"}
         </button>
         <button
           className={
             override ? "chip settings-chip overridden" : "chip settings-chip"
           }
-          title="Adjust the settings for this run"
-          onClick={() => setEditing(true)}
+          title="Adjust the settings and suggest dishes"
+          disabled={planning}
+          onClick={() => setSuggesting(true)}
         >
           ⚙ {settingsSummary(effective)}
           {override && <span className="chip-flag"> · this run</span>}
@@ -735,17 +781,12 @@ export function PlanWeek() {
         <ArchiveModal onPick={loadRun} onClose={() => setBrowsing(false)} />
       )}
 
-      {editing && (
-        <OverrideModal
-          draft={effective}
-          defaults={defaults}
-          onChange={applyDraft}
-          onReset={() => setOverride(null)}
-          onEditDefaults={() => {
-            setEditing(false);
-            openSettings();
-          }}
-          onClose={() => setEditing(false)}
+      {suggesting && (
+        <SuggestSheet
+          initial={effective}
+          defaults={settings}
+          onSuggest={suggestWith}
+          onClose={() => setSuggesting(false)}
         />
       )}
 
@@ -755,7 +796,7 @@ export function PlanWeek() {
         <div className="banner">
           ⚠ Partial plan — asked for {run.requestedDays} days ×{" "}
           {run.requestedSuggestionsPerDay}, the model returned {run.dayCount}.
-          <button className="btn" onClick={handlePlan}>
+          <button className="btn" onClick={() => void handlePlan()}>
             Try again
           </button>
         </div>
@@ -773,7 +814,7 @@ export function PlanWeek() {
         <div className="banner error">
           The model couldn't produce a plan this time
           {run.error ? ` (${run.error})` : ""}.
-          <button className="btn" onClick={handlePlan}>
+          <button className="btn" onClick={() => void handlePlan()}>
             Try again
           </button>
         </div>
@@ -824,7 +865,7 @@ export function PlanWeek() {
                 </button>
               </li>
               <li>
-                <button className="ready-row" onClick={openSettings}>
+                <button className="ready-row" onClick={() => openSettings("planning")}>
                   <span className="ready-icon">🏷️</span>
                   <span>
                     <strong>
@@ -867,6 +908,18 @@ export function PlanWeek() {
               : null
           }
           onClose={() => setDetails(null)}
+          onAddIngredients={() => {
+            setAddingOne(details);
+            setDetails(null);
+          }}
+        />
+      )}
+
+      {addingOne && (
+        <IngredientReview
+          selected={[{ key: "one", dayLabel: "My week", suggestion: addingOne }]}
+          onCancel={() => setAddingOne(null)}
+          onConfirm={(items) => void handleConfirmOne(items)}
         />
       )}
 
