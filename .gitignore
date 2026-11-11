@@ -8,3 +8,18 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Node
+node_modules/
+*.tsbuildinfo
+# harness artifact at the repo root; the real lockfile is frontend/package-lock.json
+/package-lock.json
+
+# App data — one JSON file per entity plus image binaries; never committed
+/data/
+
+# Pytest / tooling caches
+.pytest_cache/
+
+# Secrets
+/.env

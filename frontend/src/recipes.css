@@ -1,0 +1,61 @@
+/* Recipes screen ------------------------------------------------------------ */
+
+.recipe-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.recipe-thumb {
+  display: block;
+  aspect-ratio: 19 / 12;
+  background: var(--line);
+}
+
+.recipe-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: opacity 0.15s;
+}
+
+.recipe-thumb:hover img {
+  opacity: 0.88;
+}
+
+.recipe-thumb-empty {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.recipe-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: 14px 16px 16px;
+}
+
+.recipe-card .sugg-chips {
+  margin-bottom: 12px;
+}
+
+.chip.have-fresh {
+  background: #eef6ea;
+  border-color: #cfe3c4;
+  color: #2f5a1f;
+}
+
+.chip.have-staple {
+  background: #eef1f5;
+  border-color: #d5dce6;
+  color: #46566b;
+}

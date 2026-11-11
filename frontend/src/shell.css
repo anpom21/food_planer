@@ -1,0 +1,958 @@
+/* The app shell: header, tabs, page rhythm, sheets — and the phone layout.
+   Loaded after app.css, so the shared rules here win where they overlap. */
+
+:root {
+  --topbar-h: 56px;
+  --tabbar-h: 60px;
+  --pill-bg: #efe8de;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100dvh;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* Buttons and button-styled links line up the same: icon and label centred,
+   never underlined. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-decoration: none;
+}
+
+.shopping-row {
+  cursor: pointer;
+}
+
+/* --- Header ---------------------------------------------------------------- */
+
+.shell {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: calc(var(--topbar-h) + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) 0
+    max(16px, env(safe-area-inset-left));
+  background: rgba(250, 246, 240, 0.88);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 17px;
+  cursor: pointer;
+}
+
+.brand-mark {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.tabs-top {
+  display: flex;
+  gap: 4px;
+  margin: 0 auto;
+}
+
+.tab {
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.tabs-top .tab {
+  display: flex;
+  align-items: center;
+  /* Room for the icon's badge, which sticks out to its right. */
+  gap: 16px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.tabs-top .tab:hover {
+  color: var(--ink);
+}
+
+.tabs-top .tab.on {
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.tab-icon {
+  position: relative;
+  display: inline-flex;
+}
+
+.tab-icon svg,
+.icon-btn svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tab-badge {
+  position: absolute;
+  top: -6px;
+  right: -10px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  background: var(--pill-bg);
+  color: var(--ink);
+}
+
+.tabs-bottom {
+  display: none;
+}
+
+.screen {
+  flex: 1;
+  width: 100%;
+}
+
+.splash {
+  min-height: 100dvh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+}
+
+.splash .brand-mark {
+  font-size: 48px;
+}
+
+/* --- Pages: one rhythm for every tab ---------------------------------------- */
+
+.page,
+.library,
+.plan-week {
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 24px 24px 56px;
+}
+
+.page-head,
+.toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.page-head h1,
+.toolbar h1 {
+  margin: 0 0 4px;
+  font-size: 26px;
+  letter-spacing: -0.01em;
+}
+
+.page-head p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.head-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.page-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--pill-bg);
+}
+
+.segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--ink-soft);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.segmented button.on {
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(44, 38, 34, 0.12);
+}
+
+.seg-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--line);
+  font-size: 11px;
+}
+
+.search {
+  flex: 1;
+  min-width: 200px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.search:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-color: var(--accent);
+}
+
+.result-count {
+  margin: -6px 0 12px;
+  font-size: 13px;
+}
+
+.show-more {
+  display: flex;
+  justify-content: center;
+  padding-top: 20px;
+}
+
+.empty-state.stacked {
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 48px 16px;
+  text-align: center;
+}
+
+.empty-state.stacked p {
+  max-width: 440px;
+  margin: 0;
+}
+
+/* --- Tying the tabs together ------------------------------------------------- */
+
+.plan-ready {
+  max-width: 560px;
+  margin: 8px auto 0;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.plan-ready h2 {
+  margin: 0 0 6px;
+  font-size: 19px;
+}
+
+.plan-ready > p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.ready-list {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ready-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--ink);
+  text-align: left;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.ready-row:hover {
+  border-color: #d8cdbc;
+}
+
+.ready-icon {
+  font-size: 22px;
+}
+
+.ready-go {
+  margin-left: auto;
+  color: var(--ink-soft);
+  font-size: 22px;
+}
+
+.next-steps {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px dashed #d8cdbc;
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.next-steps .muted {
+  margin-right: auto;
+}
+
+/* ☆ on a recipe card: save it into My dishes. */
+.recipe-card {
+  position: relative;
+}
+
+/* The corner over a recipe photo: plate+ (to My week) next to ☆ (save). */
+.card-corner {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.card-corner .plate-plus,
+.recipe-save {
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  color: var(--ink);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.card-corner .plate-plus {
+  display: grid;
+  place-items: center;
+  padding: 7px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+
+.recipe-save.on {
+  color: var(--favourite);
+  cursor: default;
+}
+
+/* --- Sheets and dialogs ---------------------------------------------------- */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(28, 24, 20, 0.42);
+  animation: fade-in 0.15s ease-out;
+}
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 680px;
+  max-height: min(90vh, 920px);
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--bg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.sheet.wide {
+  max-width: 1120px;
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 10px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.sheet-head h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.sheet-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px 20px 24px;
+}
+
+.sheet-body .settings,
+.sheet-body .offers {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.settings-panel {
+  display: grid;
+  gap: 16px;
+}
+
+/* Save and Close stay reachable at the bottom edge of a long sheet or dialog,
+   instead of waiting at the end of the scroll. */
+.sheet-body .settings-actions {
+  position: sticky;
+  bottom: -24px;
+  z-index: 2;
+  margin: 0 -20px -24px;
+  padding: 12px 20px 16px;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+
+/* Dialogs opened from inside a sheet (the prompt editor) sit above it, and an
+   offer's popover above any dialog. */
+.modal-backdrop {
+  z-index: 1100;
+}
+
+.offer-pop {
+  z-index: 1300;
+}
+
+.toast {
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* Centred with left: 50%, a toast would otherwise shrink to half the
+     screen and wrap a short message into a tall blob on a phone. */
+  width: max-content;
+  max-width: calc(100% - 32px);
+  border-radius: 18px;
+}
+
+.toast-action {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rise {
+  from {
+    transform: translateY(32px);
+    opacity: 0.6;
+  }
+}
+
+/* --- Tablets: two columns, icon tabs --------------------------------------- */
+
+@media (max-width: 960px) {
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tabs-top .tab-label {
+    display: none;
+  }
+
+  .tabs-top .tab.on .tab-label {
+    display: inline;
+  }
+}
+
+/* --- Phones: thumb-first ----------------------------------------------------- */
+
+@media (max-width: 760px) {
+  :root {
+    --topbar-h: 48px;
+  }
+
+  .tabs-top {
+    display: none;
+  }
+
+  .settings-btn {
+    margin-left: auto;
+  }
+
+  .tabs-bottom {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 900;
+    padding: 4px max(4px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom))
+      max(4px, env(safe-area-inset-left));
+    background: rgba(255, 255, 255, 0.92);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+    backdrop-filter: saturate(180%) blur(14px);
+    border-top: 1px solid var(--line);
+  }
+
+  .tabs-bottom .tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-height: 52px;
+    padding: 4px 0;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .tabs-bottom .tab.on {
+    color: var(--accent);
+  }
+
+  .tabs-bottom .tab-icon svg {
+    width: 26px;
+    height: 26px;
+  }
+
+  .screen {
+    padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+  }
+
+  .page,
+  .library,
+  .plan-week,
+  .settings {
+    padding: 16px max(16px, env(safe-area-inset-right)) 28px max(16px, env(safe-area-inset-left));
+  }
+
+  .page-head h1,
+  .toolbar h1 {
+    font-size: 24px;
+  }
+
+  .page-head .head-actions {
+    width: 100%;
+  }
+
+  .head-actions .btn {
+    flex: 1;
+    text-align: center;
+  }
+
+  .page-tools {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .segmented {
+    display: flex;
+  }
+
+  .segmented button {
+    flex: 1;
+    justify-content: center;
+    padding: 9px 6px;
+  }
+
+  .search {
+    min-width: 0;
+  }
+
+  .grid,
+  .fridge-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* 16px stops iOS zooming into a field; 44px is a comfortable tap. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  .btn {
+    min-height: 44px;
+  }
+
+  /* Every dialog becomes a bottom sheet. */
+  .sheet-backdrop,
+  .modal-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .sheet,
+  .modal,
+  .modal.wide,
+  .modal.wide.prompt-editor {
+    width: 100%;
+    max-width: none;
+    max-height: 94dvh;
+    border-radius: 18px 18px 0 0;
+    animation: rise 0.22s ease-out;
+  }
+
+  .modal {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+  }
+
+  .sheet-body {
+    padding: 14px 16px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .modal-actions {
+    flex-wrap: wrap;
+  }
+
+  .modal-actions .btn {
+    flex: 1;
+  }
+
+  .modal .modal-actions {
+    position: sticky;
+    bottom: calc(-20px - env(safe-area-inset-bottom));
+    z-index: 2;
+    margin: 12px -16px calc(-20px - env(safe-area-inset-bottom));
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+  }
+
+  .sheet-body .settings-actions {
+    bottom: calc(-24px - env(safe-area-inset-bottom));
+    margin: 0 -16px calc(-24px - env(safe-area-inset-bottom));
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  /* Two offers side by side, so the tilbudsavis scans like the paper. */
+  .offer-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .offer-body {
+    padding: 8px 10px 10px;
+  }
+
+  .offer-name {
+    font-size: 14px;
+  }
+
+  .offers-bar {
+    flex-wrap: wrap;
+  }
+
+  .offers-bar > * {
+    flex: 1 1 100%;
+  }
+
+  /* The shopping list's four actions as a 2×2 grid. */
+  .shopping .page-head .head-actions .btn {
+    flex: 1 1 calc(50% - 4px);
+  }
+
+  /* The plan reads top to bottom, a day at a time. */
+  .plan-board {
+    flex-direction: column;
+    overflow-x: visible;
+  }
+
+  .day-column {
+    flex: none;
+    width: 100%;
+  }
+
+  .plan-bar > .btn.primary {
+    flex: 1 1 100%;
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .select-bar {
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+    padding: 10px 16px;
+  }
+
+  .toast {
+    bottom: calc(var(--tabbar-h) + 16px + env(safe-area-inset-bottom));
+  }
+
+  .shopping-actions {
+    flex-wrap: wrap;
+  }
+
+  .shopping-row {
+    min-height: 48px;
+  }
+
+  .add-tile {
+    min-height: 56px;
+  }
+
+  .settings-actions .btn {
+    flex: 1;
+  }
+
+  /* A flatter photo, so a card fits on screen with its buttons. */
+  .recipe-thumb {
+    aspect-ratio: 2 / 1;
+  }
+
+  .shopping-row input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+  }
+
+  .next-steps .btn {
+    flex: 1;
+  }
+
+  .plan-ready {
+    padding: 18px 16px;
+  }
+}
+
+/* A food icon leads each shopping-list row. */
+.shopping-icon {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--bg);
+  font-size: 18px;
+}
+
+/* Chain logos are mostly wide wordmarks (REMA 1000 is ~6:1): keep their own
+   shape at the badge's height instead of squeezing them into its circle. */
+.shop-logo {
+  width: auto;
+  height: 22px;
+  max-width: 76px;
+  border-radius: 4px;
+  object-fit: contain;
+  background: transparent;
+}
+
+/* The card photo is a button that opens Details. */
+button.recipe-thumb {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+
+/* In Details the photo links out to the recipe; a small label says so. */
+.recipe-link-thumb {
+  position: relative;
+}
+
+.recipe-link-hint {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(28, 24, 20, 0.7);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.reminders-setup p {
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+.setup-steps {
+  margin: 0 0 14px;
+  padding-left: 22px;
+  display: grid;
+  gap: 10px;
+  line-height: 1.5;
+}
+
+.setup-steps code,
+.reminders-setup code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--pill-bg);
+  font-size: 0.92em;
+}
+
+.setup-again {
+  margin: 14px 0 0;
+  font-size: 13px;
+}
+
+/* Recipe cards: Details above the main action, both full width. */
+.recipe-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: auto;
+}
+
+/* Shopping list, grouped by shop: a heading per shop with its brand colour. */
+.shopping-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 2px 2px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  list-style: none;
+}
+
+.shopping-group:first-child {
+  margin-top: 0;
+}
+
+.shopping-group-name {
+  color: var(--ink);
+}
+
+.shop-square {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.shop-square.small {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.offer-chip {
+  gap: 6px;
+}
+
+/* Chips on a shopping row wrap inside the card instead of running off it:
+   a long offer name ("Netto hakket oksekød 4-7% eller …") breaks onto more
+   lines rather than widening the row. */
+.shopping-chips {
+  max-width: 100%;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.shopping-chips .chip {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+
+.shopping-chips .shop-square {
+  align-self: flex-start;
+  margin-top: 3px;
+}

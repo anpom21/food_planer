@@ -7,11 +7,31 @@ authors = [
     { name = "Andreas Pommerencke", email = "anpom21@student.sdu.dk" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "python-multipart>=0.0.18",
+    "openai>=3.16.2",
+    "python-dotenv>=1.2.3",
+    "httpx>=0.28",
+    "beautifulsoup4>=4.15.0",
+    "claude-agent-sdk>=0.2.174",
+    "argon2-cffi>=25.1.0",
+]
 
 [project.scripts]
 food-planer = "food_planer:main"
+food-planer-recipes = "food_planer.recipes:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "httpx>=0.28",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
